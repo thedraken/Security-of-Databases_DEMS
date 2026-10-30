@@ -1,0 +1,103 @@
+
+# ==========================================
+# HugeGraph Asset Management - .gitignore
+# ==========================================
+
+# ------------------------------------------
+# Credentials and environment variables
+# ------------------------------------------
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+# ------------------------------------------
+# HugeGraph database and runtime data
+# ------------------------------------------
+# Local database storage
+data/
+db/
+rocksdb/
+hugegraph-data/
+hugegraph-data-*/
+hubble-data/
+
+# Logs and temporary runtime files
+logs/
+*.log
+*.log.*
+tmp/
+temp/
+*.pid
+
+# ------------------------------------------
+# Docker
+# ------------------------------------------
+# Local Docker Compose overrides
+compose.override.yaml
+compose.override.yml
+docker-compose.override.yml
+docker-compose.override.yaml
+
+# Local Docker environment files
+*.env.local
+
+# ------------------------------------------
+# Node.js / React / Vite
+# ------------------------------------------
+node_modules/
+dist/
+build/
+coverage/
+.npm/
+.pnpm-store/
+*.tsbuildinfo
+
+# Local development caches
+.vite/
+.cache/
+.eslintcache
+
+# ------------------------------------------
+# macOS
+# ------------------------------------------
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# ------------------------------------------
+# IDEs and editors
+# ------------------------------------------
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+*.swp
+*.swo
+*~
+
+# ------------------------------------------
+# Java / Maven / Gradle
+# ------------------------------------------
+target/
+.gradle/
+**/build/
+*.class
+
+# ------------------------------------------
+# Local backups
+# ------------------------------------------
+backups/
+*.bak
+*.backup
+*.dump
+*.sql.gz
