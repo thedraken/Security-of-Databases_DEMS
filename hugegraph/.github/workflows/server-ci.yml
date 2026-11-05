@@ -1,0 +1,216 @@
+name: "HugeGraph-Server CI"
+
+on:
+  push:
+    branches: [master, 'release-*', 'test-*', 'tinkerpop-*']
+  pull_request:
+  schedule:
+    - cron: '0 6 * * 1'
+      timezone: Asia/Singapore
+  workflow_dispatch:
+    inputs:
+      test-set:
+        description: Tests to run on the selected branch
+        type: choice
+        default: mainline
+        options: [mainline, dependencies, distributed, macos-arm, hbase, riscv64, codeql, full]
+
+# New PR heads and master pushes replace their old runs; scheduled and manual runs stay independent.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref == 'refs/heads/master' && github.ref) || github.run_id }}-${{ github.run_attempt == 1 && 'head' || format('rerun-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/master') }}
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  preflight:
+    name: check-license
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    outputs:
+      dependency_baseline: ${{ steps.baseline.outputs.enabled }}
+      selection_result: ${{ steps.select.outcome }}
+      java_result: ${{ steps.java.outcome }}
+      java_versions: ${{ steps.java.outputs.versions }}
+      server: ${{ steps.select.outputs.server }}
+      commons: ${{ steps.select.outputs.commons }}
+      struct: ${{ steps.select.outputs.struct }}
+      pd: ${{ steps.select.outputs.pd }}
+      store: ${{ steps.select.outputs.store }}
+      hstore: ${{ steps.select.outputs.hstore }}
+      pd_store: ${{ steps.select.outputs.pd_store }}
+      cluster: ${{ steps.select.outputs.cluster }}
+      docker: ${{ steps.select.outputs.docker }}
+      helm: ${{ steps.select.outputs.helm }}
+      dependency_license: ${{ steps.select.outputs.dependency_license }}
+      macos: ${{ steps.select.outputs.macos }}
+      macos_full: ${{ steps.select.outputs.macos_full }}
+      hbase: ${{ steps.select.outputs.hbase }}
+      riscv64: ${{ steps.select.outputs.riscv64 }}
+      security: ${{ steps.select.outputs.security }}
+      distributed_smoke: ${{ steps.select.outputs.distributed_smoke }}
+    steps:
+      - name: Checkout
+        id: checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Select affected tests
+        id: select
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python3 .github/scripts/ci-policy.py plan --project server
+          --event-name "$GITHUB_EVENT_NAME" --event-path "$GITHUB_EVENT_PATH"
+          --repository "$GITHUB_REPOSITORY" --output "$RUNNER_TEMP/ci-plan.json"
+
+      - name: Select trusted master baseline
+        id: baseline
+        env:
+          ENABLED: ${{ ((github.repository == 'apache/hugegraph' && github.event.repository.fork == false) || github.repository == 'hugegraph/hugegraph') && github.ref == 'refs/heads/master' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.test-set == 'dependencies')) }}
+        run: echo "enabled=$ENABLED" >> "$GITHUB_OUTPUT"
+
+      - name: Read project Java runtime
+        id: java
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        run: |
+          python3 - <<'PYTHON'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          runtime = Path('.github/workflows/.java-version').read_text().strip()
+          if not re.fullmatch(r'[1-9][0-9]*(\.[0-9]+)*', runtime):
+              raise ValueError('Project Java runtime must be a non-empty numeric version')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              print('versions=' + json.dumps([runtime]), file=output)
+          PYTHON
+
+      - name: Record selection
+        if: ${{ !cancelled() && steps.select.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-plan
+          path: ${{ runner.temp }}/ci-plan.json
+          retention-days: 7
+          overwrite: true
+
+      - name: Test CI policy and deployment checks
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py'
+
+      - name: Check Helm chart
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' && steps.select.outputs.helm == 'true' }}
+        uses: ./.github/actions/helm-checks
+
+      - name: Check license headers
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        uses: apache/skywalking-eyes@main
+        with:
+          log: info
+          token: ${{ github.token }}
+          config: .licenserc.yaml
+
+      - name: License Check (RAT)
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        run: |
+          mvn apache-rat:check -ntp
+          find . -name rat.txt -print0 | xargs -0 -I file cat file > "$RUNNER_TEMP/merged-rat.txt"
+          cat "$RUNNER_TEMP/merged-rat.txt"
+
+  build-server:
+    needs: preflight
+    if: ${{ !cancelled() && needs.preflight.outputs.selection_result == 'success' && needs.preflight.outputs.java_result == 'success' && needs.preflight.outputs.server == 'true' }}
+    uses: ./.github/workflows/server-tests.yml
+    with:
+      backend: memory
+      java-versions: ${{ needs.preflight.outputs.java_versions }}
+    secrets: inherit
+
+  server-rocksdb:
+    needs: preflight
+    if: ${{ !cancelled() && needs.preflight.outputs.selection_result == 'success' && needs.preflight.outputs.java_result == 'success' && needs.preflight.outputs.server == 'true' }}
+    uses: ./.github/workflows/server-tests.yml
+    with:
+      backend: rocksdb
+      java-versions: ${{ needs.preflight.outputs.java_versions }}
+    secrets: inherit
+
+  commons:
+    needs: preflight
+    if: ${{ !cancelled() && needs.preflight.outputs.selection_result == 'success' && needs.preflight.outputs.java_result == 'success' && needs.preflight.outputs.commons == 'true' }}
+    uses: ./.github/workflows/commons-ci.yml
+    with:
+      java-versions: ${{ needs.preflight.outputs.java_versions }}
+    secrets: inherit
+
+  pd_store:
+    needs: preflight
+    if: ${{ !cancelled() && needs.preflight.outputs.selection_result == 'success' && needs.preflight.outputs.java_result == 'success' && needs.preflight.outputs.pd_store == 'true' }}
+    uses: ./.github/workflows/pd-store-ci.yml
+    with:
+      run-struct: ${{ needs.preflight.outputs.struct == 'true' }}
+      run-pd: ${{ needs.preflight.outputs.pd == 'true' }}
+      run-store: ${{ needs.preflight.outputs.store == 'true' }}
+      run-hstore: ${{ needs.preflight.outputs.hstore == 'true' }}
+    secrets: inherit
+
+  cluster:
+    needs: preflight
+    if: ${{ !cancelled() && needs.preflight.outputs.selection_result == 'success' && needs.preflight.outputs.java_result == 'success' && needs.preflight.outputs.cluster == 'true' }}
+    uses: ./.github/workflows/cluster-test-ci.yml
+    secrets: inherit
+
+  docker:
+    needs: preflight
+    if: ${{ !cancelled() && needs.preflight.outputs.selection_result == 'success' && needs.preflight.outputs.java_result == 'success' && (needs.preflight.outputs.docker == 'true' || needs.preflight.outputs.distributed_smoke == 'true') }}
+    uses: ./.github/workflows/docker-build-ci.yml
+    with:
+      smoke-only: ${{ needs.preflight.outputs.distributed_smoke == 'true' && needs.preflight.outputs.docker != 'true' }}
+
+  dependency_license:
+    needs: preflight
+    if: ${{ !cancelled() && needs.preflight.outputs.selection_result == 'success' && needs.preflight.outputs.java_result == 'success' && (needs.preflight.outputs.dependency_license == 'true' || (needs.preflight.outputs.dependency_baseline == 'true' && needs.preflight.result == 'success')) }}
+    uses: ./.github/workflows/check-dependencies.yml
+    with:
+      check-inventory: ${{ needs.preflight.outputs.dependency_license == 'true' }}
+      submit-baseline: ${{ needs.preflight.result == 'success' && needs.preflight.outputs.dependency_baseline == 'true' }}
+
+  dependency_baseline:
+    needs: [preflight, dependency_license]
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.preflight.outputs.dependency_baseline == 'true' && needs.dependency_license.result == 'success' }}
+    uses: ./.github/workflows/submit-dependencies.yml
+    permissions:
+      contents: write
+      actions: read
+    with:
+      artifact-id: ${{ needs.dependency_license.outputs.artifact_id }}
+      inventory-artifact-id: ${{ needs.dependency_license.outputs.inventory_artifact_id }}
+
+  compatibility:
+    needs: preflight
+    if: ${{ !cancelled() && needs.preflight.outputs.selection_result == 'success' && needs.preflight.outputs.java_result == 'success' && (needs.preflight.outputs.macos == 'true' || needs.preflight.outputs.hbase == 'true' || needs.preflight.outputs.riscv64 == 'true') }}
+    uses: ./.github/workflows/server-compatibility-ci.yml
+    with:
+      java-versions: ${{ needs.preflight.outputs.java_versions }}
+      macos: ${{ needs.preflight.outputs.macos == 'true' }}
+      macos-full: ${{ needs.preflight.outputs.macos_full == 'true' }}
+      hbase: ${{ needs.preflight.outputs.hbase == 'true' }}
+      riscv64: ${{ needs.preflight.outputs.riscv64 == 'true' }}
+    secrets: inherit
+
+  codeql:
+    needs: preflight
+    if: ${{ !cancelled() && needs.preflight.outputs.selection_result == 'success' && needs.preflight.outputs.java_result == 'success' && needs.preflight.outputs.security == 'true' }}
+    uses: ./.github/workflows/codeql-analysis.yml
+    permissions:
+      contents: read
+      actions: read
+      security-events: write

@@ -1,0 +1,132 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+suite: Server replica discovery announced to PD
+templates:
+  - server-deployment.yaml
+tests:
+  - it: injects the pod IP through the downward API
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].env[?(@.name=="POD_IP")].valueFrom.fieldRef.fieldPath
+          value: status.podIP
+
+  - it: announces each pod's own address to PD by default
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].env[?(@.name=="HG_SERVER_URLS_TO_PD")].value
+          pattern: "^http://\\$\\(POD_IP\\):8080$"
+
+  - it: announces the shared advertiseUrl instead when one is set
+    set:
+      server.advertiseUrl: http://graph.example.com:30080
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].env[?(@.name=="HG_SERVER_URLS_TO_PD")].value
+          value: http://graph.example.com:30080
+
+  # The wrapper always registers server.urls_to_pd; the image would let an
+  # extraEnv value turn that off again or crash-loop the Pod on a bad flag.
+  - it: refuses an operator extraEnv that would override the PD registration flag
+    set:
+      server.extraEnv:
+        - name: HG_SERVER_DEPLOY_IN_K8S
+          value: "false"
+    asserts:
+      - failedTemplate:
+          errorPattern: "server.extraEnv must not set the chart-managed variable HG_SERVER_DEPLOY_IN_K8S"
+
+  - it: refuses an operator extraEnv that would shadow POD_IP
+    set:
+      server.extraEnv:
+        - name: POD_IP
+          value: 10.0.0.1
+    asserts:
+      - failedTemplate:
+          errorPattern: "POD_IP"
+
+  - it: preserves the image service identity by default
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[0].env[?(@.name=="HG_SERVER_SERVICE_ID")]
+      - notExists:
+          path: spec.template.spec.containers[0].env[?(@.name=="HG_SERVER_GRAPHSPACE")]
+
+  - it: selects a non-default service identity
+    set:
+      server.serviceId: analytics
+      server.graphSpace: team_a
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].env[?(@.name=="HG_SERVER_SERVICE_ID")].value
+          value: analytics
+      - equal:
+          path: spec.template.spec.containers[0].env[?(@.name=="HG_SERVER_GRAPHSPACE")].value
+          value: team_a
+
+  - it: refuses an extraEnv that shadows the service ID
+    set:
+      server.extraEnv:
+        - name: HG_SERVER_SERVICE_ID
+          value: shadow
+    asserts:
+      - failedTemplate:
+          errorPattern: "HG_SERVER_SERVICE_ID"
+
+  - it: refuses an extraEnv that shadows the graph space
+    set:
+      server.extraEnv:
+        - name: HG_SERVER_GRAPHSPACE
+          value: shadow
+    asserts:
+      - failedTemplate:
+          errorPattern: "HG_SERVER_GRAPHSPACE"
+
+  - it: retains a service name containing spaces
+    set:
+      server.serviceId: ops team
+      server.graphSpace: team_a
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].env[?(@.name=="HG_SERVER_SERVICE_ID")].value
+          value: ops team
+
+  - it: refuses an extraEnv that shadows the legacy service ID
+    set:
+      server.extraEnv:
+        - name: SERVICE_ID
+          value: shadow
+    asserts:
+      - failedTemplate:
+          errorPattern: "SERVICE_ID"
+
+  - it: refuses an extraEnv that shadows the legacy graph space
+    set:
+      server.extraEnv:
+        - name: GRAPH_SPACE
+          value: shadow
+    asserts:
+      - failedTemplate:
+          errorPattern: "GRAPH_SPACE"
+
+  - it: escapes all dollars so Kubernetes retains a literal service ID
+    set:
+      server.serviceId: 'x-$(POD_IP)-$$(POD_IP)-$(UNKNOWN)-$name-$'
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].env[?(@.name=="HG_SERVER_SERVICE_ID")].value
+          value: 'x-$$(POD_IP)-$$$$(POD_IP)-$$(UNKNOWN)-$$name-$$'

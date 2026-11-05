@@ -1,0 +1,633 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.hugegraph.core;
+
+import java.nio.channels.OverlappingFileLockException;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+
+import org.apache.commons.configuration2.BaseConfiguration;
+import org.apache.commons.configuration2.Configuration;
+import org.apache.commons.configuration2.PropertiesConfiguration;
+import org.apache.hugegraph.exception.HugeException;
+import org.apache.hugegraph.HugeGraph;
+import org.apache.hugegraph.id.IdGenerator;
+import org.apache.hugegraph.backend.store.BackendStoreInfo;
+import org.apache.hugegraph.backend.store.rocksdb.RocksDBOptions;
+import org.apache.hugegraph.backend.tx.IdCounter;
+import org.apache.hugegraph.config.CoreOptions;
+import org.apache.hugegraph.exception.ExistedException;
+import org.apache.hugegraph.masterelection.GlobalMasterInfo;
+import org.apache.hugegraph.struct.schema.EdgeLabel;
+import org.apache.hugegraph.struct.schema.IndexLabel;
+import org.apache.hugegraph.struct.schema.PropertyKey;
+import org.apache.hugegraph.schema.SchemaManager;
+import org.apache.hugegraph.struct.schema.VertexLabel;
+import org.apache.hugegraph.testutil.Assert;
+import org.apache.hugegraph.testutil.Utils;
+import org.apache.hugegraph.testutil.Whitebox;
+import org.apache.hugegraph.type.HugeType;
+import org.apache.hugegraph.type.define.EdgeLabelType;
+import org.apache.tinkerpop.gremlin.structure.T;
+import org.apache.tinkerpop.gremlin.structure.Vertex;
+import org.apache.tinkerpop.gremlin.structure.util.GraphFactory;
+import org.junit.Assume;
+import org.junit.Test;
+import org.mockito.Mockito;
+import org.rocksdb.RocksDBException;
+
+import com.google.common.collect.ImmutableList;
+
+public class MultiGraphsTest extends BaseCoreTest {
+
+    private static final String NAME48 = "g12345678901234567890123456789012345678901234567";
+
+    @Test
+    public void testWriteAndReadVersion() {
+        List<HugeGraph> graphs = openGraphs("g_1", NAME48);
+        for (HugeGraph graph : graphs) {
+            graph.initBackend();
+            // Init more than once no side effect
+            graph.initBackend();
+
+            BackendStoreInfo backendStoreInfo = graph.backendStoreInfo();
+            Assert.assertTrue(backendStoreInfo.exists());
+            Assert.assertTrue(backendStoreInfo.checkVersion());
+
+            graph.clearBackend();
+        }
+        destroyGraphs(graphs);
+    }
+
+    @Test
+    public void testTruncateBackendKeepsVersionAndResetsSchemaIds() {
+        // hstore keeps the schema in PD meta after truncate and caches id ranges
+        Assume.assumeFalse("skip this test for hstore",
+                           "hstore".equals(graph().backend()));
+
+        HugeGraph graph = openGraphs("truncate_g").get(0);
+        try {
+            // Start from a clean backend in case a previous run failed midway
+            graph.clearBackend();
+            graph.initBackend();
+            graph.serverStarted(GlobalMasterInfo.master("server-truncate"));
+
+            BackendStoreInfo backendStoreInfo = graph.backendStoreInfo();
+            Assert.assertTrue(backendStoreInfo.checkVersion());
+
+            SchemaManager schema = graph.schema();
+            schema.propertyKey("name").asText().create();
+            VertexLabel person = schema.vertexLabel("person")
+                                       .properties("name")
+                                       .useAutomaticId().create();
+            graph.addVertex(T.label, "person", "name", "marko");
+            graph.tx().commit();
+            Assert.assertEquals(1L, graph.traversal().V().count().next());
+
+            graph.truncateBackend();
+
+            // The backend version written by init() survives the truncate
+            Assert.assertTrue(backendStoreInfo.exists());
+            Assert.assertTrue(backendStoreInfo.checkVersion());
+            // The schema and the data are gone
+            Assert.assertEquals(0L, graph.traversal().V().count().next());
+            Assert.assertTrue(schema.getVertexLabels().isEmpty());
+            Assert.assertTrue(schema.getPropertyKeys().isEmpty());
+            // The schema id counters are reset: the same ids are handed out
+            schema.propertyKey("name").asText().create();
+            VertexLabel person2 = schema.vertexLabel("person")
+                                        .properties("name")
+                                        .useAutomaticId().create();
+            Assert.assertEquals(person.id(), person2.id());
+            graph.addVertex(T.label, "person", "name", "marko");
+            graph.tx().commit();
+            Assert.assertEquals(1L, graph.traversal().V().count().next());
+
+            graph.clearBackend();
+        } finally {
+            destroyGraphs(ImmutableList.of(graph));
+        }
+    }
+
+    @Test
+    public void testHstoreTruncateBackendKeepsSchemaIdCounters() {
+        Assume.assumeTrue("only hstore keeps the schema id counters in PD",
+                          "hstore".equals(graph().backend()));
+
+        HugeGraph graph = openGraphs("truncate_hs").get(0);
+        try {
+            graph.clearBackend();
+            graph.initBackend();
+            graph.serverStarted(GlobalMasterInfo.master("server-truncate"));
+
+            SchemaManager schema = graph.schema();
+            PropertyKey name = schema.propertyKey("name").asText().create();
+
+            graph.truncateBackend();
+
+            // The schema lives in PD meta and survives the truncate
+            Assert.assertEquals(name.id(), schema.getPropertyKey("name").id());
+
+            // Another Server holds no cached id range, it asks PD for one: drop
+            // the range this process cached for the graph's property key
+            // counter, under the key the counter itself builds
+            Object schemaTx = Whitebox.invoke(graph.getClass(),
+                                              "schemaTransaction", graph);
+            IdCounter counter = Whitebox.getInternalState(schemaTx, "idCounter");
+            String key = Whitebox.invoke(IdCounter.class,
+                                         new Class<?>[]{String.class,
+                                                        HugeType.class},
+                                         "toKey", counter,
+                                         Whitebox.getInternalState(counter,
+                                                                   "graphName"),
+                                         HugeType.PROPERTY_KEY);
+            Map<String, ?> ranges = Whitebox.getInternalState(IdCounter.class, "ids");
+            Assert.assertNotNull(ranges.remove(key));
+
+            PropertyKey age = schema.propertyKey("age").asInt().create();
+            Assert.assertTrue(String.format("id %s reused after %s", age.id(), name.id()),
+                              age.id().asLong() > name.id().asLong());
+
+            graph.clearBackend();
+        } finally {
+            destroyGraphs(ImmutableList.of(graph));
+        }
+    }
+
+    @Test
+    public void testCreateMultiGraphs() {
+        List<HugeGraph> graphs = openGraphs("g_1", NAME48);
+        for (HugeGraph graph : graphs) {
+            graph.initBackend();
+            graph.clearBackend();
+        }
+        destroyGraphs(graphs);
+    }
+
+    @Test
+    public void testCopySchemaWithMultiGraphs() {
+        // FIXME: The legacy HStore guard and related coverage debt are tracked in
+        // https://github.com/apache/hugegraph/issues/3090
+        Assume.assumeTrue("skip this test for hstore",
+                          Objects.equals("hstore", System.getProperty("backend")));
+
+        List<HugeGraph> graphs = openGraphs("schema_g1", "schema_g2");
+        for (HugeGraph graph : graphs) {
+            graph.initBackend();
+        }
+        HugeGraph g1 = graphs.get(0);
+        g1.serverStarted(GlobalMasterInfo.master("server-g2"));
+        HugeGraph g2 = graphs.get(1);
+        g2.serverStarted(GlobalMasterInfo.master("server-g3"));
+
+        SchemaManager schema = g1.schema();
+
+        schema.propertyKey("id").asInt().checkExist(false).create();
+        schema.propertyKey("name").asText().checkExist(false).create();
+        schema.propertyKey("age").asInt().valueSingle().checkExist(false).create();
+        schema.propertyKey("city").asText().checkExist(false).create();
+        schema.propertyKey("weight").asDouble().valueList().checkExist(false).create();
+        schema.propertyKey("born").asDate().ifNotExist().create();
+        schema.propertyKey("time").asDate().ifNotExist().create();
+
+        schema.vertexLabel("person")
+              .properties("id", "name", "age", "city", "weight", "born")
+              .primaryKeys("id").create();
+        schema.vertexLabel("person2")
+              .properties("id", "name", "age", "city")
+              .primaryKeys("id").create();
+        schema.edgeLabel("friend").sourceLabel("person").targetLabel("person")
+              .properties("time").create();
+
+        schema.indexLabel("personByName").onV("person").secondary()
+              .by("name").create();
+        schema.indexLabel("personByCity").onV("person").search()
+              .by("city").create();
+        schema.indexLabel("personByAge").onV("person").range()
+              .by("age").create();
+        schema.indexLabel("friendByTime").onE("friend").range()
+              .by("time").create();
+
+        Assert.assertFalse(g2.existsPropertyKey("id"));
+        Assert.assertFalse(g2.existsPropertyKey("name"));
+        Assert.assertFalse(g2.existsPropertyKey("age"));
+        Assert.assertFalse(g2.existsPropertyKey("city"));
+        Assert.assertFalse(g2.existsPropertyKey("weight"));
+        Assert.assertFalse(g2.existsPropertyKey("born"));
+        Assert.assertFalse(g2.existsPropertyKey("time"));
+
+        Assert.assertFalse(g2.existsVertexLabel("person"));
+        Assert.assertFalse(g2.existsVertexLabel("person2"));
+        Assert.assertFalse(g2.existsEdgeLabel("friend"));
+
+        Assert.assertFalse(g2.existsIndexLabel("personByName"));
+        Assert.assertFalse(g2.existsIndexLabel("personByCity"));
+        Assert.assertFalse(g2.existsIndexLabel("personByAge"));
+        Assert.assertFalse(g2.existsIndexLabel("friendByTime"));
+
+        // Copy schema from g1 to g2
+        g2.schema().copyFrom(g1.schema());
+
+        Assert.assertTrue(g2.existsPropertyKey("id"));
+        Assert.assertTrue(g2.existsPropertyKey("name"));
+        Assert.assertTrue(g2.existsPropertyKey("age"));
+        Assert.assertTrue(g2.existsPropertyKey("city"));
+        Assert.assertTrue(g2.existsPropertyKey("weight"));
+        Assert.assertTrue(g2.existsPropertyKey("born"));
+        Assert.assertTrue(g2.existsPropertyKey("time"));
+
+        Assert.assertTrue(g2.existsVertexLabel("person"));
+        Assert.assertTrue(g2.existsVertexLabel("person2"));
+        Assert.assertTrue(g2.existsEdgeLabel("friend"));
+
+        Assert.assertTrue(g2.existsIndexLabel("personByName"));
+        Assert.assertTrue(g2.existsIndexLabel("personByCity"));
+        Assert.assertTrue(g2.existsIndexLabel("personByAge"));
+        Assert.assertTrue(g2.existsIndexLabel("friendByTime"));
+
+        for (PropertyKey copied : g2.schema().getPropertyKeys()) {
+            PropertyKey origin = g1.schema().getPropertyKey(copied.name());
+            Assert.assertTrue(origin.hasSameContent(copied));
+        }
+        for (VertexLabel copied : schema.getVertexLabels()) {
+            VertexLabel origin = g1.schema().getVertexLabel(copied.name());
+            Assert.assertTrue(origin.hasSameContent(copied));
+        }
+        for (EdgeLabel copied : schema.getEdgeLabels()) {
+            EdgeLabel origin = g1.schema().getEdgeLabel(copied.name());
+            Assert.assertTrue(origin.hasSameContent(copied));
+
+        }
+        for (IndexLabel copied : schema.getIndexLabels()) {
+            IndexLabel origin = g1.schema().getIndexLabel(copied.name());
+            Assert.assertTrue(origin.hasSameContent(copied));
+        }
+
+        // Copy schema again from g1 to g2 (ignore identical content)
+        g2.schema().copyFrom(g1.schema());
+
+        for (PropertyKey copied : g2.schema().getPropertyKeys()) {
+            PropertyKey origin = g1.schema().getPropertyKey(copied.name());
+            Assert.assertTrue(origin.hasSameContent(copied));
+        }
+        for (VertexLabel copied : schema.getVertexLabels()) {
+            VertexLabel origin = g1.schema().getVertexLabel(copied.name());
+            Assert.assertTrue(origin.hasSameContent(copied));
+        }
+        for (EdgeLabel copied : schema.getEdgeLabels()) {
+            EdgeLabel origin = g1.schema().getEdgeLabel(copied.name());
+            Assert.assertTrue(origin.hasSameContent(copied));
+
+        }
+        for (IndexLabel copied : schema.getIndexLabels()) {
+            IndexLabel origin = g1.schema().getIndexLabel(copied.name());
+            Assert.assertTrue(origin.hasSameContent(copied));
+        }
+
+        for (HugeGraph graph : graphs) {
+            graph.clearBackend();
+        }
+        destroyGraphs(graphs);
+    }
+
+    @Test
+    public void testCopySchemaIndexUsesSourceLabelNameWhenIdsDiffer() {
+        List<HugeGraph> graphs = openGraphs("schema_origin", "schema_target");
+        try {
+            for (HugeGraph graph : graphs) {
+                graph.initBackend();
+                graph.serverStarted(GlobalMasterInfo.master("schema-index-copy"));
+            }
+            HugeGraph source = graphs.get(0);
+            HugeGraph target = graphs.get(1);
+            source.schema().propertyKey("name").asText().create();
+            source.schema().vertexLabel("person").properties("name").useAutomaticId().create();
+            source.schema().indexLabel("personByName").onV("person").secondary()
+                  .by("name").create();
+            EdgeLabel parent = source.schema().edgeLabel("zParent").asBase().create();
+            EdgeLabel child = source.schema().edgeLabel("aChild").withBase("zParent")
+                                    .link("person", "person").create();
+            target.schema().vertexLabel("unrelated").useAutomaticId().create();
+            SchemaManager sourceSchema = Mockito.spy(source.schema());
+            // Storage iteration order must not be relied on for parent dependencies.
+            Mockito.doReturn(ImmutableList.of(child, parent)).when(sourceSchema).getEdgeLabels();
+
+            target.schema().copyFrom(sourceSchema);
+
+            Assert.assertEquals(target.schema().getEdgeLabel("zParent").id(),
+                                target.schema().getEdgeLabel("aChild").fatherId());
+            Assert.assertNotEquals(source.schema().getVertexLabel("person").id(),
+                                   target.schema().getVertexLabel("person").id());
+            Assert.assertEquals(target.schema().getVertexLabel("person").id(),
+                                target.schema().getIndexLabel("personByName").baseValue());
+        } finally {
+            for (HugeGraph graph : graphs) {
+                graph.clearBackend();
+            }
+            destroyGraphs(graphs);
+        }
+    }
+
+    @Test
+    public void testCopySchemaRebuildsDerivedParentSortKeys() {
+        List<HugeGraph> graphs = openGraphs("sort_origin", "sort_target");
+        try {
+            for (HugeGraph graph : graphs) {
+                graph.initBackend();
+                graph.serverStarted(GlobalMasterInfo.master("schema-sort-copy"));
+            }
+            HugeGraph source = graphs.get(0);
+            HugeGraph target = graphs.get(1);
+            source.schema().propertyKey("time").asInt().create();
+            source.schema().vertexLabel("person").useAutomaticId().create();
+            source.schema().edgeLabel("singleParent").asBase().create();
+            source.schema().edgeLabel("singleChild").withBase("singleParent")
+                  .link("person", "person").multiTimes()
+                  .properties("time").sortKeys("time").create();
+            source.schema().edgeLabel("multiParent").asBase().multiTimes()
+                  .properties("time").sortKeys("time").create();
+            source.schema().edgeLabel("multiChild").withBase("multiParent")
+                  .link("person", "person").multiTimes()
+                  .properties("time").sortKeys("time").create();
+
+            // This backend currently does not persist parent/subtype metadata.
+            // Supply typed labels explicitly to exercise builder reconstruction;
+            // the public clone endpoint rejects edge labels until metadata is safe.
+            EdgeLabel singleParent = source.schema().getEdgeLabel("singleParent");
+            EdgeLabel singleChild = source.schema().getEdgeLabel("singleChild");
+            EdgeLabel multiParent = source.schema().getEdgeLabel("multiParent");
+            EdgeLabel multiChild = source.schema().getEdgeLabel("multiChild");
+            singleParent.edgeLabelType(EdgeLabelType.PARENT);
+            singleChild.edgeLabelType(EdgeLabelType.SUB);
+            singleChild.fatherId(singleParent.id());
+            multiParent.edgeLabelType(EdgeLabelType.PARENT);
+            multiChild.edgeLabelType(EdgeLabelType.SUB);
+            multiChild.fatherId(multiParent.id());
+            SchemaManager sourceSchema = Mockito.spy(source.schema());
+            Mockito.doReturn(ImmutableList.of(singleChild, multiChild, singleParent, multiParent))
+                   .when(sourceSchema).getEdgeLabels();
+            target.schema().copyFrom(sourceSchema);
+
+            for (String parent : new String[]{"singleParent", "multiParent"}) {
+                EdgeLabel original = source.schema().getEdgeLabel(parent);
+                EdgeLabel copied = target.schema().getEdgeLabel(parent);
+                Assert.assertEquals(original.frequency(), copied.frequency());
+                Assert.assertEquals(ImmutableList.of(target.schema().getPropertyKey("time").id()),
+                                    copied.sortKeys());
+            }
+            Assert.assertEquals(target.schema().getEdgeLabel("singleParent").id(),
+                                target.schema().getEdgeLabel("singleChild").fatherId());
+            Assert.assertEquals(target.schema().getEdgeLabel("multiParent").id(),
+                                target.schema().getEdgeLabel("multiChild").fatherId());
+        } finally {
+            for (HugeGraph graph : graphs) {
+                graph.clearBackend();
+            }
+            destroyGraphs(graphs);
+        }
+    }
+
+    @Test
+    public void testCopySchemaWithMultiGraphsWithConflict() {
+        List<HugeGraph> graphs = openGraphs("schema_g1", "schema_g2");
+        for (HugeGraph graph : graphs) {
+            graph.initBackend();
+        }
+        HugeGraph g1 = graphs.get(0);
+        HugeGraph g2 = graphs.get(1);
+        g1.serverStarted(GlobalMasterInfo.master("server-g1c"));
+        g2.serverStarted(GlobalMasterInfo.master("server-g2c"));
+
+        g1.schema().propertyKey("id").asInt().checkExist(false).create();
+        g2.schema().propertyKey("id").asText().checkExist(false).create();
+
+        Assert.assertThrows(ExistedException.class, () -> {
+            g2.schema().copyFrom(g1.schema());
+        }, e -> {
+            Assert.assertEquals("The property key 'id' has existed",
+                                e.getMessage());
+        });
+
+        for (HugeGraph graph : graphs) {
+            graph.clearBackend();
+        }
+        destroyGraphs(graphs);
+    }
+
+    @Test
+    public void testCreateGraphsWithInvalidNames() {
+        List<String> invalidNames = ImmutableList.of("", " ", " g", "g 1", " .", ". .",
+                                                     "@", "$", "%", "^", "&", "*", "(", ")",
+                                                     "_", "+", "`", "-", "=", "{", "}", "|",
+                                                     "[", "]", "\"", "<", "?", ";", "'", "~",
+                                                     ",", ".", "/", "\\", "~g", "g~", "g'",
+                                                     "_1", "_a", "1a", "123", NAME48 + "8");
+        for (String name : invalidNames) {
+            Assert.assertThrows(RuntimeException.class, () -> openGraphs(name));
+        }
+    }
+
+    @Test
+    public void testCreateGraphsWithSameName() {
+        List<HugeGraph> graphs = openGraphs("gg", "gg", "GG");
+        HugeGraph g1 = graphs.get(0);
+        HugeGraph g2 = graphs.get(1);
+        HugeGraph g3 = graphs.get(2);
+
+        g1.initBackend();
+        Assert.assertTrue(g1.backendStoreInfo().exists());
+        Assert.assertTrue(g2.backendStoreInfo().exists());
+        Assert.assertTrue(g3.backendStoreInfo().exists());
+
+        g2.initBackend(); // no error
+        g3.initBackend();
+
+        Assert.assertThrows(IllegalArgumentException.class,
+                            () -> g2.vertexLabel("node"));
+        Assert.assertThrows(IllegalArgumentException.class,
+                            () -> g3.vertexLabel("node"));
+        g1.schema().vertexLabel("node").useCustomizeNumberId().ifNotExist().create();
+        g2.vertexLabel("node");
+        g3.vertexLabel("node");
+
+        g1.addVertex(T.label, "node", T.id, 1);
+        g1.tx().commit();
+        Iterator<Vertex> vertices = g2.vertices(1);
+        Assert.assertTrue(vertices.hasNext());
+        Vertex vertex = vertices.next();
+        Assert.assertFalse(vertices.hasNext());
+        Assert.assertEquals(IdGenerator.of(1), vertex.id());
+
+        vertices = g3.vertices(1);
+        Assert.assertTrue(vertices.hasNext());
+        vertex = vertices.next();
+        Assert.assertFalse(vertices.hasNext());
+        Assert.assertEquals(IdGenerator.of(1), vertex.id());
+
+        g1.clearBackend();
+        g2.clearBackend();
+        g3.clearBackend();
+
+        destroyGraphs(ImmutableList.of(g1, g2, g3));
+    }
+
+    @Test
+    public void testCreateGraphWithSameNameDifferentBackends() throws Exception {
+        // FIXME: The legacy HStore guard and related coverage debt are tracked in
+        // https://github.com/apache/hugegraph/issues/3090
+        Assume.assumeTrue("skip this test for hstore",
+                          Objects.equals("hstore", System.getProperty("backend")));
+
+        HugeGraph g1 = openGraphWithBackend("graph", "memory", "text");
+        g1.initBackend();
+        Assert.assertThrows(RuntimeException.class,
+                            () -> openGraphWithBackend("graph", "rocksdb", "binary"));
+        g1.clearBackend();
+        g1.close();
+    }
+
+    @Test
+    public void testCreateGraphsWithDifferentNameDifferentBackends() {
+        HugeGraph g1 = openGraphWithBackend("g1", "memory", "text");
+        HugeGraph g2 = openGraphWithBackend("g2", "rocksdb", "binary");
+        HugeGraph graph = openGraphs("graph").get(0);
+        g1.initBackend();
+        g2.initBackend();
+        graph.initBackend();
+
+        g1.clearBackend();
+        g2.clearBackend();
+        graph.clearBackend();
+
+        destroyGraphs(ImmutableList.of(g1, g2, graph));
+    }
+
+    @Test
+    public void testOpenGraphWithRemovedTaskSchedulerType() {
+        HugeGraph graph = openGraphWithBackend("legacySchedulerType",
+                                               "rocksdb", "binary",
+                                               "task.scheduler_type", "local");
+        destroyGraphs(ImmutableList.of(graph));
+    }
+
+    @Test
+    public void testCreateGraphsWithMultiDisksForRocksDB() {
+        HugeGraph g1 = openGraphWithBackend("g1", "rocksdb", "binary", "rocksdb.data_disks",
+                                            "[g/secondary_index:rocksdb-index1," +
+                                            " g/range_int_index:rocksdb-index1," +
+                                            " g/range_long_index:rocksdb-index2]");
+        g1.initBackend();
+        g1.clearBackend();
+
+        final HugeGraph[] g2 = new HugeGraph[1];
+        Assert.assertThrows(RuntimeException.class, () -> {
+            g2[0] = openGraphWithBackend("g2", "rocksdb", "binary",
+                                         "rocksdb.data_disks",
+                                         "[g/range_int_index:rocksdb-index1]");
+            g2[0].initBackend();
+        }, e -> {
+            RocksDBException failure = rocksDBCause(e);
+            Assert.assertNotNull(failure.getCause());
+            Assert.assertContains("lock hold by current process",
+                                  failure.getMessage());
+            Assert.assertContains("No locks available",
+                                  failure.getMessage());
+            Assert.assertInstanceOf(OverlappingFileLockException.class,
+                                    HugeException.rootCause(failure));
+        });
+
+        final HugeGraph[] g3 = new HugeGraph[1];
+        Assert.assertThrows(RuntimeException.class, () -> {
+            g3[0] = openGraphWithBackend("g3", "rocksdb", "binary",
+                                         "rocksdb.data_disks",
+                                         "[g/secondary_index:/]");
+            g3[0].initBackend();
+        }, e -> {
+            RocksDBException failure = rocksDBCause(e);
+            Assert.assertNotNull(failure.getCause());
+            Assert.assertContains("Cannot lock database for open/recovery",
+                                  failure.getMessage());
+            Assert.assertContains("/g", failure.getMessage());
+        });
+
+        destroyGraphs(ImmutableList.of(g1));
+    }
+
+    private static RocksDBException rocksDBCause(Throwable exception) {
+        Throwable cause = exception;
+        while (cause != null && !(cause instanceof RocksDBException)) {
+            cause = cause.getCause();
+        }
+        Assert.assertInstanceOf(RocksDBException.class, cause);
+        return (RocksDBException) cause;
+    }
+
+    private static List<HugeGraph> openGraphs(String... graphNames) {
+        List<HugeGraph> graphs = new ArrayList<>(graphNames.length);
+        for (String graphName : graphNames) {
+            Configuration config = buildConfig(graphName);
+            graphs.add((HugeGraph) GraphFactory.open(config));
+        }
+        return graphs;
+    }
+
+    private static void destroyGraphs(List<HugeGraph> graphs) {
+        for (HugeGraph graph : graphs) {
+            try {
+                graph.close();
+            } catch (Exception e) {
+                Assert.fail(e.toString());
+            }
+        }
+    }
+
+    private static HugeGraph openGraphWithBackend(String graph, String backend,
+                                                  String serializer,
+                                                  String... configs) {
+        Configuration config = buildConfig(graph);
+        config.setProperty(CoreOptions.BACKEND.name(), backend);
+        config.setProperty(CoreOptions.SERIALIZER.name(), serializer);
+        for (int i = 0; i < configs.length; ) {
+            config.setProperty(configs[i++], configs[i++]);
+        }
+        return ((HugeGraph) GraphFactory.open(config));
+    }
+
+    private static Configuration buildConfig(String graphName) {
+        PropertiesConfiguration conf = Utils.getConf();
+        Configuration config = new BaseConfiguration();
+        for (Iterator<String> keys = conf.getKeys(); keys.hasNext(); ) {
+            String key = keys.next();
+            config.setProperty(key, conf.getProperty(key));
+        }
+
+        config.setProperty(CoreOptions.STORE.name(), graphName);
+        String dataPath = config.getString(RocksDBOptions.DATA_PATH.name());
+        config.setProperty(RocksDBOptions.DATA_PATH.name(),
+                           Paths.get(dataPath, graphName).toString());
+        String walPath = config.getString(RocksDBOptions.WAL_PATH.name());
+        config.setProperty(RocksDBOptions.WAL_PATH.name(),
+                           Paths.get(walPath, graphName).toString());
+
+        return config;
+    }
+}

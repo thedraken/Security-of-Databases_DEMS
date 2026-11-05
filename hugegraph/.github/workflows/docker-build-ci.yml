@@ -1,0 +1,166 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+name: "Docker Build CI"
+
+on:
+  workflow_call:
+    inputs:
+      smoke-only:
+        type: boolean
+        default: false
+permissions:
+  contents: read
+
+jobs:
+  docker-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      IMAGE_TAG: ci-${{ github.run_id }}-${{ github.run_attempt }}
+      SOURCE_REVISION: ${{ github.sha }}
+    steps:
+      - name: Checkout
+        id: checkout
+        uses: actions/checkout@v7
+
+      - name: Install project JDK for deployment contracts
+        id: java
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' && !inputs.smoke-only }}
+        uses: actions/setup-java@v6
+        with:
+          java-version-file: .github/workflows/.java-version
+          distribution: 'zulu'
+          cache: maven
+          cache-jdk: false
+
+      - name: Verify shared Maven stages stay identical
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' && !inputs.smoke-only }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          extract_build_stage() {
+            awk '
+              /^FROM .* AS build$/ {
+                in_build = 1
+              }
+              in_build && seen && /^FROM / {
+                exit
+              }
+              in_build {
+                print
+                seen = 1
+              }
+            ' "$1"
+          }
+
+          reference="hugegraph-pd/Dockerfile"
+          if [ -z "$(extract_build_stage "$reference")" ]; then
+            echo "ERROR: no 'AS build' stage found in $reference"
+            exit 1
+          fi
+          for dockerfile in \
+            hugegraph-store/Dockerfile \
+            hugegraph-server/Dockerfile \
+            hugegraph-server/Dockerfile-hstore; do
+            diff -u \
+              <(extract_build_stage "$reference") \
+              <(extract_build_stage "$dockerfile")
+          done
+
+      - name: Validate shared image build graph
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' && !inputs.smoke-only }}
+        run: |
+          set -euo pipefail
+
+          docker buildx bake --file docker/bake.hcl --print > /tmp/hugegraph-bake.json
+          jq -e '
+            .group.default.targets == [
+              "build-cache",
+              "pd",
+              "server-hstore",
+              "server-standalone",
+              "store"
+            ] and
+            ([.target[] | .platforms] |
+              all(. == ["linux/amd64", "linux/arm64"])) and
+            .target["build-cache"].target == "build" and
+            .target["build-cache"].output[0].type == "cacheonly" and
+            ([.target | to_entries[] |
+              select(.key != "build-cache") |
+              .value.output[0].type] |
+              all(. == "docker"))
+          ' /tmp/hugegraph-bake.json
+
+      - name: Verify deployment shell and Compose contracts
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' && steps.java.outcome == 'success' }}
+        timeout-minutes: 25
+        run: |
+          set -euo pipefail
+          status=0
+          if mvn -B -ntp -pl hugegraph-commons/hugegraph-common -am clean compile dependency:build-classpath \
+              -Dmdep.outputFile=target/config-readback-classpath.txt -Dmaven.javadoc.skip=true -DskipTests; then
+            HG_CONFIG_TEST_CLASSPATH="$PWD/hugegraph-commons/hugegraph-common/target/classes"
+            HG_CONFIG_TEST_CLASSPATH+=":$(cat hugegraph-commons/hugegraph-common/target/config-readback-classpath.txt)"
+            export HG_CONFIG_TEST_CLASSPATH
+            if ! bash hugegraph-server/hugegraph-dist/docker/docker-entrypoint-test.sh; then
+              status=1
+            fi
+          else
+            status=1
+          fi
+          if ! bash hugegraph-server/hugegraph-dist/docker/test/test-docker-entrypoint.sh; then
+            status=1
+          fi
+          if ! bash hugegraph-server/hugegraph-dist/src/assembly/travis/test-check-port.sh \
+              hugegraph-server/hugegraph-dist/src/assembly/static \
+              hugegraph-store/hg-store-dist/src/assembly/static/bin/util.sh; then
+            status=1
+          fi
+          if ! bash docker/test-compose.sh render; then
+            status=1
+          fi
+          exit "$status"
+
+      - name: Build current images and verify authentication, readiness and graph read/write
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        timeout-minutes: 45
+        env:
+          SMOKE_ONLY: ${{ inputs.smoke-only }}
+        run: |
+          set -euo pipefail
+          docker buildx create --driver docker-container --use
+          docker buildx bake --file docker/bake.hcl --progress=plain \
+            --set '*.platform=linux/amd64' \
+            pd store server-standalone server-hstore
+
+          # Each runtime check uses successfully built images. Preserve a failed
+          # check while allowing the independent deployment check to collect results.
+          status=0
+          if ! bash .github/scripts/check-docker-images.sh; then
+            status=1
+          fi
+          if [[ "$SMOKE_ONLY" != true ]]; then
+            if ! python3 -m unittest discover -s .github/scripts -p 'test_docker_deployment.py'; then
+              status=1
+            fi
+          fi
+          if ! python3 .github/scripts/docker-deployment.py "$IMAGE_TAG"; then
+            status=1
+          fi
+          exit "$status"

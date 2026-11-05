@@ -1,0 +1,276 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.hugegraph.api.cypher;
+
+import java.lang.reflect.Array;
+import java.util.Collections;
+import java.util.IdentityHashMap;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.ExecutionException;
+import java.util.function.Supplier;
+
+import javax.annotation.Nullable;
+import javax.annotation.concurrent.ThreadSafe;
+
+import org.apache.commons.configuration2.Configuration;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.util.E;
+import org.apache.hugegraph.util.Log;
+import org.apache.tinkerpop.gremlin.driver.Client;
+import org.apache.tinkerpop.gremlin.driver.Cluster;
+import org.apache.tinkerpop.gremlin.driver.Result;
+import org.apache.tinkerpop.gremlin.driver.ResultSet;
+import org.apache.tinkerpop.gremlin.process.traversal.Path;
+import org.apache.tinkerpop.gremlin.util.Tokens;
+import org.apache.tinkerpop.gremlin.util.message.RequestMessage;
+import org.slf4j.Logger;
+
+@ThreadSafe
+public final class CypherClient {
+
+    private static final Logger LOG = Log.logger(CypherClient.class);
+    private static final int NORMALIZE_MAX_DEPTH = 32;
+    private final Supplier<Configuration> configurationSupplier;
+    private String userName;
+    private String password;
+    private String token;
+
+    CypherClient(Supplier<Configuration> configurationSupplier) {
+        this.configurationSupplier = configurationSupplier;
+    }
+
+    CypherClient(String userName, String password,
+                 Supplier<Configuration> configurationSupplier) {
+        this.userName = userName;
+        this.password = password;
+        this.configurationSupplier = configurationSupplier;
+    }
+
+    CypherClient(String token, Supplier<Configuration> configurationSupplier) {
+        this.token = token;
+        this.configurationSupplier = configurationSupplier;
+    }
+
+    public CypherModel submitQuery(String cypherQuery, @Nullable Map<String, String> aliases) {
+        return this.submitQuery(cypherQuery, aliases, Collections.emptyMap());
+    }
+
+    public CypherModel submitQuery(String cypherQuery, @Nullable Map<String, String> aliases,
+                                   Map<String, Object> parameters) {
+        E.checkArgument(cypherQuery != null && !cypherQuery.isBlank(),
+                        "The cypher-query parameter must be a nonblank string");
+        E.checkArgument(parameters != null, "The parameters parameter must be an object");
+
+        RequestMessage request = createRequest(cypherQuery, parameters);
+        Cluster cluster = Cluster.open(getConfig());
+        Client client = null;
+        CypherModel res;
+
+        try {
+            client = cluster.connect();
+            if (aliases != null && !aliases.isEmpty()) {
+                client = client.alias(aliases);
+            }
+            List<Object> list = this.doQueryList(client, request);
+            res = CypherModel.dataOf(request.getRequestId().toString(), list);
+        } catch (Exception e) {
+            LOG.error(String.format("Failed to submit cypher-query: [ %s ], caused by:",
+                                    cypherQuery), e);
+            res = CypherModel.failOf(request.getRequestId().toString(),
+                                     e.getMessage(), CypherErrorMapper.map(e));
+        } finally {
+            try {
+                if (client != null) {
+                    client.close();
+                }
+            } finally {
+                cluster.close();
+            }
+        }
+
+        return res;
+    }
+
+    static RequestMessage createRequest(String cypherQuery, Map<String, Object> parameters) {
+        return RequestMessage.build(Tokens.OPS_EVAL)
+                             .processor("cypher")
+                             .add(Tokens.ARGS_GREMLIN, cypherQuery)
+                             .add(Tokens.ARGS_BINDINGS, parameters)
+                             .create();
+    }
+
+    private List<Object> doQueryList(Client client, RequestMessage request)
+            throws ExecutionException, InterruptedException {
+        ResultSet results = client.submitAsync(request).get();
+
+        Iterator<Result> iter = results.iterator();
+        List<Object> list = new LinkedList<>();
+
+        while (iter.hasNext()) {
+            Result data = iter.next();
+            list.add(normalize(data.getObject()));
+        }
+
+        return list;
+    }
+
+    static Object normalize(Object value) {
+        return normalize(value, 0, new IdentityHashMap<>());
+    }
+
+    private static Object normalize(Object value, int depth,
+                                    IdentityHashMap<Object, Boolean> seen) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Id matchedId) {
+            return matchedId.asObject();
+        }
+        boolean composite = value instanceof Map || value instanceof Path ||
+                            value instanceof Iterable ||
+                            value.getClass().isArray();
+        if (!composite) {
+            return value;
+        }
+        if (depth >= NORMALIZE_MAX_DEPTH) {
+            throw new IllegalArgumentException(
+                      "Exceeded max normalization depth 32");
+        }
+        if (value instanceof Map<?, ?> matchedMap) {
+            if (seen.put(value, Boolean.TRUE) != null) {
+                throw new IllegalArgumentException(
+                          "Detected cyclic Cypher result");
+            }
+            Map<Object, Object> normalized = new LinkedHashMap<>();
+            try {
+                for (Map.Entry<?, ?> entry : matchedMap.entrySet()) {
+                    normalized.put(normalize(entry.getKey(), depth + 1, seen),
+                                   normalize(entry.getValue(), depth + 1, seen));
+                }
+            } finally {
+                seen.remove(value);
+            }
+            return normalized;
+        }
+        if (value instanceof Path matchedPath) {
+            if (seen.put(value, Boolean.TRUE) != null) {
+                throw new IllegalArgumentException(
+                          "Detected cyclic Cypher result");
+            }
+            Map<String, Object> normalized = new LinkedHashMap<>();
+            try {
+                Path path = matchedPath;
+                normalized.put("labels",
+                               normalize(path.labels(), depth + 1, seen));
+                normalized.put("objects",
+                               normalize(path.objects(), depth + 1, seen));
+            } finally {
+                seen.remove(value);
+            }
+            return normalized;
+        }
+        if (value instanceof Iterable<?> iterable) {
+            if (seen.put(value, Boolean.TRUE) != null) {
+                throw new IllegalArgumentException(
+                          "Detected cyclic Cypher result");
+            }
+            List<Object> normalized = new LinkedList<>();
+            try {
+                for (Object item : iterable) {
+                    normalized.add(normalize(item, depth + 1, seen));
+                }
+            } finally {
+                seen.remove(value);
+            }
+            return normalized;
+        }
+        if (value.getClass().isArray()) {
+            if (seen.put(value, Boolean.TRUE) != null) {
+                throw new IllegalArgumentException(
+                          "Detected cyclic Cypher result");
+            }
+            List<Object> normalized = new LinkedList<>();
+            try {
+                int length = Array.getLength(value);
+                for (int i = 0; i < length; i++) {
+                    normalized.add(normalize(Array.get(value, i), depth + 1,
+                                             seen));
+                }
+            } finally {
+                seen.remove(value);
+            }
+            return normalized;
+        }
+        return value;
+    }
+
+    /**
+     * As Sasl does not support a token, which is a coded string to indicate a legal user,
+     * we had to use a trick to fix it. When the token is set, the password will be set to
+     * an empty string, which is an uncommon value under normal conditions.
+     * The token will then be transferred through the userName-property.
+     * To see org.apache.hugegraph.auth.StandardAuthenticator.TokenSaslAuthenticator
+     */
+    private Configuration getConfig() {
+        Configuration conf = this.configurationSupplier.get();
+        if (this.userName == null && this.token == null) {
+            // Anonymous queries must not inherit a service identity from the YAML file.
+            conf.clearProperty("username");
+            conf.clearProperty("password");
+            return conf;
+        }
+        conf.addProperty("username", this.token == null ? this.userName : this.token);
+        conf.addProperty("password", this.token == null ? this.password : "");
+
+        return conf;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        CypherClient that = (CypherClient) o;
+
+        return Objects.equals(userName, that.userName) &&
+               Objects.equals(password, that.password) &&
+               Objects.equals(token, that.token);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(userName, password, token);
+    }
+
+    @Override
+    public String toString() {
+        final StringBuilder builder = new StringBuilder("CypherClient{");
+        builder.append("userName='").append(userName).append('\'')
+               .append(", token='").append(token).append('\'').append('}');
+
+        return builder.toString();
+    }
+}

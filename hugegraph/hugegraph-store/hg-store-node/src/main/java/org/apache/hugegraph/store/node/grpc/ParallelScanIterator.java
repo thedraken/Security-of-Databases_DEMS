@@ -1,0 +1,506 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.hugegraph.store.node.grpc;
+
+import java.util.ArrayList;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Queue;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Supplier;
+import java.util.function.Consumer;
+
+import org.apache.hugegraph.pd.common.KVPair;
+import org.apache.hugegraph.rocksdb.access.RocksDBSession;
+import org.apache.hugegraph.rocksdb.access.ScanIterator;
+import org.apache.hugegraph.store.buffer.KVByteBuffer;
+import org.apache.hugegraph.store.grpc.common.ScanOrderType;
+import org.apache.hugegraph.store.grpc.stream.ScanQueryRequest;
+import org.apache.hugegraph.store.node.util.HgAssert;
+import org.apache.hugegraph.store.node.util.PropertyUtil;
+import org.apache.hugegraph.store.term.Bits;
+
+import com.alipay.sofa.jraft.util.Utils;
+
+import lombok.extern.slf4j.Slf4j;
+
+/**
+ * Support parallel read batch query iterator
+ */
+@Slf4j
+public class ParallelScanIterator implements ScanIterator {
+
+    private static final int waitDataMaxTryTimes = 600;
+    protected static int maxBodySize =
+            PropertyUtil.getInt("app.scan.stream.body.size", 1024 * 1024);
+    private final int batchSize = PropertyUtil.getInt("app.scan.stream.entries.size", 20000);
+    private final Supplier<KVPair<QueryCondition, ScanIterator>> batchSupplier;
+    private final Supplier<Long> limitSupplier;
+    private final BlockingQueue<List<KV>> queue;
+    private final ReentrantLock queueLock = new ReentrantLock();
+    final private ThreadPoolExecutor executor;
+    private final ScanQueryRequest query;
+    private final Queue<KVScanner> scanners = new LinkedList<>();
+    private final Queue<KVScanner> pauseScanners = new LinkedList<>();
+    final private List<KV> NO_DATA = new ArrayList<>();
+    private final boolean orderVertex;
+    private final boolean orderEdge;
+    private int maxWorkThreads = Utils.cpus() / 8;
+    private int maxInQueue = maxWorkThreads * 2;
+    private volatile boolean finished;
+    private List<KV> current = null;
+    private final Consumer<Throwable> cleanupReporter;
+    private volatile Throwable scanFailure;
+    private volatile Throwable cleanupFailure;
+
+    private static void rethrow(Throwable failure) {
+        if (failure instanceof RuntimeException runtimeFailure) {
+            throw runtimeFailure;
+        }
+        if (failure != null) {
+            throw (Error) failure;
+        }
+    }
+
+    private synchronized void failedCleanup(Throwable failure) {
+        if (this.cleanupFailure == null) {
+            this.cleanupFailure = failure;
+        }
+        this.cleanupReporter.accept(failure);
+        this.scanFailure = this.cleanupFailure;
+        requestStop();
+    }
+
+    private ParallelScanIterator(Supplier<KVPair<QueryCondition, ScanIterator>> iteratorSupplier,
+                                 Supplier<Long> limitSupplier,
+                                 ScanQueryRequest query,
+                                 ThreadPoolExecutor executor, Consumer<Throwable> cleanupReporter) {
+        this.cleanupReporter = cleanupReporter;
+        this.executor = executor;
+        this.batchSupplier = iteratorSupplier;
+        this.limitSupplier = limitSupplier;
+        this.finished = false;
+        this.query = query;
+        orderVertex = query.getOrderType() == ScanOrderType.ORDER_STRICT;
+        orderEdge = query.getOrderType() == ScanOrderType.ORDER_WITHIN_VERTEX;
+        if (orderVertex) {
+            this.maxWorkThreads = 1;
+        } else {
+            this.maxWorkThreads =
+                    Math.max(1, Math.min(query.getConditionCount() / 16, maxWorkThreads));
+        }
+        this.maxInQueue = maxWorkThreads * 2;
+        // Edge sorted requires a larger queue
+        queue = new LinkedBlockingQueue<>(maxInQueue * 2);
+        try {
+            createScanner();
+        } catch (RuntimeException e) {
+            close();
+            throw e;
+        }
+    }
+
+    public static ParallelScanIterator of(
+            Supplier<KVPair<QueryCondition, ScanIterator>> iteratorSupplier,
+            Supplier<Long> limitSupplier,
+            ScanQueryRequest query,
+            ThreadPoolExecutor executor) {
+        HgAssert.isArgumentNotNull(iteratorSupplier, "iteratorSupplier");
+        HgAssert.isArgumentNotNull(limitSupplier, "limitSupplier");
+        return of(iteratorSupplier, limitSupplier, query, executor, ignored -> { });
+    }
+
+    static ParallelScanIterator of(Supplier<KVPair<QueryCondition, ScanIterator>> iteratorSupplier,
+                                   Supplier<Long> limitSupplier, ScanQueryRequest query,
+                                   ThreadPoolExecutor executor, Consumer<Throwable> cleanupReporter) {
+        return new ParallelScanIterator(iteratorSupplier, limitSupplier, query, executor, cleanupReporter);
+    }
+
+    @Override
+    public boolean hasNext() {
+        int tryTimes = 0;
+        while (current == null && tryTimes < waitDataMaxTryTimes) {
+            try {
+                if (queue.size() != 0 || !finished) {
+                    current = queue.poll(100,
+                                         TimeUnit.MILLISECONDS);  // Regularly check if the
+                    // client has been closed.
+                    if (current == null && !finished) {
+                        wakeUpScanner();
+                    }
+                } else {
+                    break;
+                }
+            } catch (InterruptedException e) {
+                log.error("hasNext interrupted {}", e);
+                break;
+            }
+            tryTimes++;
+        }
+        if (current == null && tryTimes >= waitDataMaxTryTimes) {
+            log.error("Wait data timeout!!!, scanner is {}/{}", scanners.size(),
+                      pauseScanners.size());
+        }
+        rethrow(this.scanFailure);
+        return current != null && current != NO_DATA;
+    }
+
+    @Override
+    public boolean isValid() {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public List<KV> next() {
+        List<KV> t = current;
+        current = null;
+        if (queue.size() < maxWorkThreads) {
+            wakeUpScanner();
+        }
+        return t;
+    }
+
+    void requestStop() {
+        this.finished = true;
+    }
+
+    @Override
+    public void close() {
+        requestStop();
+        List<KVScanner> pending;
+        synchronized (scanners) {
+            pending = new ArrayList<>(scanners);
+        }
+        // Stop active scanner reads before close() waits for their iterator locks.
+        for (KVScanner scanner : pending) {
+            scanner.interruptReader();
+        }
+        // Never hold a registry lock while waiting for a scanner's iterator lock.
+        for (KVScanner scanner : pending) {
+            scanner.close();
+        }
+        synchronized (pauseScanners) {
+            pauseScanners.clear();
+        }
+        queue.clear();
+        rethrow(this.cleanupFailure);
+    }
+
+    /**
+     * Create Scanner
+     */
+    private void createScanner() {
+        synchronized (scanners) {
+            for (int i = 0; i < maxWorkThreads; i++) {
+                scanners.add(new KVScanner());
+            }
+            scanners.forEach(scanner -> {
+                executor.execute(() -> scanner.scanKV());
+            });
+        }
+    }
+
+    /**
+     * Wake up scanner
+     */
+    private void wakeUpScanner() {
+        synchronized (pauseScanners) {
+            if (!finished && !pauseScanners.isEmpty()) {
+                KVScanner scanner = pauseScanners.poll();
+                if (scanner != null) {
+                    try {
+                        executor.execute(() -> scanner.scanKV());
+                    } catch (java.util.concurrent.RejectedExecutionException e) {
+                        scanner.close();
+                        throw e;
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Sleep Scanner
+     *
+     * @param scanner
+     */
+    private void suspendScanner(KVScanner scanner) {
+        synchronized (pauseScanners) {
+            if (!finished) {
+                pauseScanners.add(scanner);
+            } else {
+                scanner.close();
+            }
+        }
+    }
+
+    private void quitScanner(KVScanner scanner) {
+        synchronized (scanners) {
+            scanner.close();
+            scanners.remove(scanner);
+            if (scanners.size() == 0) {
+                putData(NO_DATA);
+                this.finished = true;
+            }
+        }
+    }
+
+    /**
+     * Add to queue, return whether the queue is full
+     *
+     * @param data
+     * @return false: Queue is full
+     */
+    private boolean putData(List<KV> data) {
+        try {
+            while (!finished && !this.queue.offer(data, 100, TimeUnit.MILLISECONDS)) {
+                // Cancellation must release a producer whose client stopped consuming.
+            }
+        } catch (InterruptedException e) {
+            log.error("exception ", e);
+            this.finished = true;
+            return false;
+        }
+        return !finished && this.queue.size() < maxInQueue;
+    }
+
+    private boolean putData(List<KV> data, boolean hasNext) {
+        boolean locked = false;
+        try {
+            while (!finished && !(locked = queueLock.tryLock(100, TimeUnit.MILLISECONDS))) {
+                // An ordered producer may be waiting behind a cancelled scanner.
+            }
+            if (!locked) {
+                return false;
+            }
+            while (!finished && !this.queue.offer(data, 100, TimeUnit.MILLISECONDS)) {
+                // Recheck cancellation while the output queue is full.
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            this.finished = true;
+            return false;
+        } finally {
+            if (locked && finished) {
+                while (queueLock.isHeldByCurrentThread()) {
+                    queueLock.unlock();
+                }
+            } else if (locked && !hasNext) {
+                queueLock.unlock();
+            }
+        }
+        return !finished && (hasNext || this.queue.size() < maxInQueue);
+    }
+
+    private synchronized KVPair<QueryCondition, ScanIterator> getIterator() {
+        return this.batchSupplier.get();
+    }
+
+    private long getLimit() {
+        Long limit = this.limitSupplier.get();
+        if (limit == null || limit <= 0) {
+            limit = Long.valueOf(Integer.MAX_VALUE);
+        }
+        return limit;
+    }
+
+    static class KV {
+
+        public int sn;
+        public byte[] key;
+        public byte[] value;
+
+        public boolean hasSN = false;
+
+        public static KV of(RocksDBSession.BackendColumn col) {
+            KV kv = new KV();
+            kv.key = col.name;
+            kv.value = col.value;
+            return kv;
+        }
+
+        public static KV ofSeparator(int value) {
+            KV kv = new KV();
+            kv.key = new byte[4];
+            Bits.putInt(kv.key, 0, value);
+            return kv;
+        }
+
+        public KV setNo(int sn) {
+            this.sn = sn;
+            hasSN = true;
+            return this;
+        }
+
+        public void write(KVByteBuffer buffer) {
+            if (hasSN) {
+                buffer.putInt(sn);
+            }
+            buffer.put(key);
+            buffer.put(value);
+        }
+
+        public int size() {
+            return this.key.length + this.value.length + 1;
+        }
+    }
+
+    class KVScanner {
+
+        private final ReentrantLock iteratorLock = new ReentrantLock();
+        private final Object readerLock = new Object();
+        private Thread reader;
+        private ScanIterator iterator = null;
+        private QueryCondition query = null;
+        private long limit;
+        private long counter;
+        private volatile boolean closed = false;
+
+        private void interruptReader() {
+            synchronized (this.readerLock) {
+                if (this.reader != null && this.reader != Thread.currentThread()) {
+                    this.reader.interrupt();
+                }
+            }
+        }
+
+        private boolean startReader() {
+            synchronized (this.readerLock) {
+                if (this.reader != null) {
+                    return false;
+                }
+                this.reader = Thread.currentThread();
+                return true;
+            }
+        }
+
+        private void finishReader() {
+            synchronized (this.readerLock) {
+                if (this.reader == Thread.currentThread()) {
+                    this.reader = null;
+                }
+            }
+        }
+
+        private ScanIterator getIterator() {
+            // Iterator has no data, or the point has reached the limit, switch to a new iterator.
+            if (iterator == null || !iterator.hasNext() || counter >= limit) {
+                closeIterator();
+                rethrow(cleanupFailure);
+                KVPair<QueryCondition, ScanIterator> pair = ParallelScanIterator.this.getIterator();
+                query = pair.getKey();
+                iterator = pair.getValue();
+                limit = getLimit();
+                counter = 0;
+            }
+            return iterator;
+        }
+
+        public void scanKV() {
+            boolean canNext = true;
+            ArrayList<KV> dataList = new ArrayList<>(batchSize);
+            dataList.ensureCapacity(batchSize);
+            if (!startReader()) {
+                return;
+            }
+            iteratorLock.lock();
+            try {
+                long entriesSize = 0, bodySize = 0;
+                while (canNext && !closed && !finished) {
+                    iterator = this.getIterator();
+                    if (iterator == null) {
+                        break;
+                    }
+                    while (!closed && !finished && iterator.hasNext() && entriesSize < batchSize &&
+                           bodySize < maxBodySize &&
+                           counter < limit && !closed) {
+                        KV kv = KV.of(iterator.next());
+                        dataList.add(orderVertex ? kv.setNo(query.getSerialNo()) : kv);
+                        bodySize += kv.size();
+                        entriesSize++;
+                        counter++;
+                    }
+                    if ((entriesSize >= batchSize || bodySize >= maxBodySize) ||
+                        (orderEdge && bodySize >= maxBodySize / 2)) {
+                        if (orderEdge) {
+                            // Sort the edges, ensure all edges of one point are consecutive,
+                            // prevent other points from inserting.
+                            canNext = putData(dataList, iterator != null && iterator.hasNext());
+                        } else {
+                            canNext = putData(dataList);
+                        }
+                        dataList = new ArrayList<>(batchSize);
+                        dataList.ensureCapacity(batchSize);
+                        entriesSize = bodySize = 0;
+                    }
+                }
+                if (!dataList.isEmpty()) {
+                    if (orderEdge) {
+                        putData(dataList, false);
+                    } else {
+                        putData(dataList);
+                    }
+                }
+            } catch (RuntimeException | Error e) {
+                scanFailure = e;
+                requestStop();
+            } finally {
+                // putData(..., true) intentionally keeps this lock across batches to
+                // serialize ordered output. The scanner must always release it before
+                // suspending or quitting, including when the next iterator is empty.
+                while (queueLock.isHeldByCurrentThread()) {
+                    queueLock.unlock();
+                }
+                iteratorLock.unlock();
+                // Clear ownership before a paused scanner can be scheduled again.
+                finishReader();
+                if (iterator != null && counter < limit && !closed && !finished) {
+                    suspendScanner(this);
+                } else {
+                    quitScanner(this);
+                }
+            }
+        }
+
+        public void close() {
+            closed = true;
+            iteratorLock.lock();
+            try {
+                closeIterator();
+            } finally {
+                iteratorLock.unlock();
+            }
+        }
+
+        private void closeIterator() {
+            ScanIterator current = this.iterator;
+            this.iterator = null;
+            if (current != null) {
+                try {
+                    current.close();
+                } catch (RuntimeException | Error failure) {
+                    failedCleanup(failure);
+                }
+            }
+        }
+    }
+}
