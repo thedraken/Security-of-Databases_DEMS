@@ -1,0 +1,267 @@
+{
+  "property_keys": [
+    "name",
+    "type",
+    "asset_id",
+    "description",
+    "status",
+    "date_opened",
+    "date_closed",
+    "privilege_level",
+    "action",
+    "scope",
+    "address",
+    "cidr",
+    "account_id",
+    "username",
+    "event_id",
+    "event_type",
+    "timestamp",
+    "outcome",
+    "job_title",
+    "severity_level",
+    "is_public",
+    "is_active"
+  ],
+  "vertices": [
+    {
+      "name": "person",
+      "properties": ["name", "job_title"]
+    },
+    {
+      "name": "device",
+      "properties": ["name", "asset_id", "status", "type"]
+    },
+    {
+      "name": "service",
+      "properties": ["name", "description", "status"]
+    },
+    {
+      "name": "department",
+      "properties": ["name"]
+    },
+    {
+      "name": "session",
+      "properties": ["date_opened", "date_closed"]
+    },
+    {
+      "name": "role",
+      "properties": ["name", "privilege_level"]
+    },
+    {
+      "name": "permission",
+      "properties": ["action", "scope"]
+    },
+    {
+      "name": "ip_address",
+      "properties": ["address", "is_public"]
+    },
+    {
+      "name": "network",
+      "properties": ["cidr"]
+    },
+    {
+      "name": "account",
+      "properties": [
+        "account_id",
+        "username",
+        "type",
+        "is_active",
+        "privilege_level"
+      ]
+    },
+    {
+      "name": "security_event",
+      "properties": [
+        "event_id",
+        "event_type",
+        "timestamp",
+        "outcome",
+        "severity_level"
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "name": "uses_device",
+      "source_label": "person",
+      "target_label": "device"
+    },
+    {
+      "name": "uses_service",
+      "source_label": "person",
+      "target_label": "service"
+    },
+    {
+      "name": "connected_to_device",
+      "source_label": "device",
+      "target_label": "device"
+    },
+    {
+      "name": "works_in_department",
+      "source_label": "person",
+      "target_label": "department"
+    },
+    {
+      "name": "session_created_by",
+      "source_label": "session",
+      "target_label": "account"
+    },
+    {
+      "name": "session_used_service",
+      "source_label": "session",
+      "target_label": "service"
+    },
+    {
+      "name": "session_from_device",
+      "source_label": "session",
+      "target_label": "device"
+    },
+    {
+      "name": "has_account",
+      "source_label": "person",
+      "target_label": "account"
+    },
+    {
+      "name": "for_service",
+      "source_label": "account",
+      "target_label": "service"
+    },
+    {
+      "name": "grants_permission",
+      "source_label": "role",
+      "target_label": "permission"
+    },
+    {
+      "name": "has_role",
+      "source_label": "account",
+      "target_label": "role"
+    },
+    {
+      "name": "applies_to",
+      "source_label": "permission",
+      "target_label": "service"
+    },
+    {
+      "name": "has_ip",
+      "source_label": "device",
+      "target_label": "ip_address"
+    },
+    {
+      "name": "in_network",
+      "source_label": "ip_address",
+      "target_label": "network"
+    },
+    {
+      "name": "hosts",
+      "source_label": "device",
+      "target_label": "service"
+    },
+    {
+      "name": "causes_event",
+      "source_label": "account",
+      "target_label": "security_event"
+    },
+    {
+      "name": "originated_from",
+      "source_label": "security_event",
+      "target_label": "ip_address"
+    },
+    {
+      "name": "targeted",
+      "source_label": "security_event",
+      "target_label": "service"
+    },
+    {
+      "name": "gives_role",
+      "source_label": "department",
+      "target_label": "role"
+    }
+  ],
+  "indexes": [
+    {
+      "name": "person_by_name",
+      "base_type": "VERTEX_LABEL",
+      "base_value": "person",
+      "index_type": "SECONDARY",
+      "fields": ["name"]
+    },
+    {
+      "name": "device_by_name",
+      "base_type": "VERTEX_LABEL",
+      "base_value": "device",
+      "index_type": "SECONDARY",
+      "fields": ["name"]
+    },
+    {
+      "name": "service_by_name",
+      "base_type": "VERTEX_LABEL",
+      "base_value": "service",
+      "index_type": "SECONDARY",
+      "fields": ["name"]
+    },
+    {
+      "name": "department_by_name",
+      "base_type": "VERTEX_LABEL",
+      "base_value": "department",
+      "index_type": "SECONDARY",
+      "fields": ["name"]
+    },
+    {
+      "name": "permission_by_action",
+      "base_type": "VERTEX_LABEL",
+      "base_value": "permission",
+      "index_type": "SECONDARY",
+      "fields": ["action"]
+    },
+    {
+      "name": "role_by_name",
+      "base_type": "VERTEX_LABEL",
+      "base_value": "role",
+      "index_type": "SECONDARY",
+      "fields": ["name"]
+    },
+    {
+      "name": "ip_address_by_address",
+      "base_type": "VERTEX_LABEL",
+      "base_value": "ip_address",
+      "index_type": "SECONDARY",
+      "fields": ["address"]
+    },
+    {
+      "name": "network_by_cidr",
+      "base_type": "VERTEX_LABEL",
+      "base_value": "network",
+      "index_type": "SECONDARY",
+      "fields": ["cidr"]
+    },
+    {
+      "name": "account_by_username",
+      "base_type": "VERTEX_LABEL",
+      "base_value": "account",
+      "index_type": "SECONDARY",
+      "fields": ["username"]
+    },
+    {
+      "name": "account_by_privilege_level",
+      "base_type": "VERTEX_LABEL",
+      "base_value": "account",
+      "index_type": "SECONDARY",
+      "fields": ["privilege_level"]
+    },
+    {
+      "name": "security_event_by_event_type",
+      "base_type": "VERTEX_LABEL",
+      "base_value": "security_event",
+      "index_type": "SECONDARY",
+      "fields": ["event_type"]
+    },
+    {
+      "name": "security_event_by_event_id",
+      "base_type": "VERTEX_LABEL",
+      "base_value": "security_event",
+      "index_type": "SECONDARY",
+      "fields": ["event_id"]
+    }
+  ]
+}
