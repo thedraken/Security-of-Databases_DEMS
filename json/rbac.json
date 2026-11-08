@@ -1,0 +1,398 @@
+{
+    "targets": [
+        {
+            "name": "entire_graph",
+            "target_details": [
+                {
+                    "type": "ALL",
+                    "label": "*",
+                    "properties": null
+                }
+            ]
+        },
+        {
+            "name": "gremlin_target",
+            "target_details": [
+                {
+                    "type": "GREMLIN",
+                    "label": "*",
+                    "properties": null
+                }
+            ]
+        },
+        {
+            "name": "service_graph",
+            "target_details": [
+                {
+                    "type": "VERTEX",
+                    "label": "session",
+                    "properties": null
+                },
+                {
+                    "type": "VERTEX",
+                    "label": "device",
+                    "properties": null
+                },
+                {
+                    "type": "VERTEX",
+                    "label": "ip_address",
+                    "properties": null
+                },
+                {
+                    "type": "VERTEX",
+                    "label": "service",
+                    "properties": null
+                },
+                {
+                    "type": "VERTEX",
+                    "label": "security_event",
+                    "properties": null
+                },
+                {
+                    "type": "VERTEX",
+                    "label": "account",
+                    "properties": null
+                },
+                {
+                    "type": "EDGE",
+                    "label": "session_from_device",
+                    "properties": null
+                },
+                {
+                    "type": "EDGE",
+                    "label": "session_used_service",
+                    "properties": null
+                },
+                {
+                    "type": "EDGE",
+                    "label": "session_created_by",
+                    "properties": null
+                },
+                {
+                    "type": "EDGE",
+                    "label": "connected_to_device",
+                    "properties": null
+                },
+                {
+                    "type": "EDGE",
+                    "label": "hosts",
+                    "properties": null
+                },
+                {
+                    "type": "EDGE",
+                    "label": "has_ip",
+                    "properties": null
+                },
+                {
+                    "type": "EDGE",
+                    "label": "originated_from",
+                    "properties": null
+                },
+                {
+                    "type": "EDGE",
+                    "label": "targeted",
+                    "properties": null
+                },
+                {
+                    "type": "EDGE",
+                    "label": "for_service",
+                    "properties": null
+                },
+                {
+                    "type": "EDGE",
+                    "label": "causes_event",
+                    "properties": null
+                }
+                
+            ]
+        },
+        {
+            "name": "service_schema",
+            "target_details": [
+                {
+                    "type": "VERTEX_LABEL",
+                    "label": "session",
+                    "properties": null
+                },
+                {
+                    "type": "VERTEX_LABEL",
+                    "label": "device",
+                    "properties": null
+                },
+                {
+                    "type": "VERTEX_LABEL",
+                    "label": "ip_address",
+                    "properties": null
+                },
+                {
+                    "type": "VERTEX_LABEL",
+                    "label": "service",
+                    "properties": null
+                },
+                {
+                    "type": "VERTEX_LABEL",
+                    "label": "security_event",
+                    "properties": null
+                },
+                {
+                    "type": "VERTEX_LABEL",
+                    "label": "account",
+                    "properties": null
+                },
+                {
+                    "type": "EDGE_LABEL",
+                    "label": "session_from_device",
+                    "properties": null
+                },
+                {
+                    "type": "EDGE_LABEL",
+                    "label": "session_used_service",
+                    "properties": null
+                },
+                {
+                    "type": "EDGE_LABEL",
+                    "label": "session_created_by",
+                    "properties": null
+                },
+                {
+                    "type": "EDGE_LABEL",
+                    "label": "connected_to_device",
+                    "properties": null
+                },
+                {
+                    "type": "EDGE_LABEL",
+                    "label": "hosts",
+                    "properties": null
+                },
+                {
+                    "type": "EDGE_LABEL",
+                    "label": "has_ip",
+                    "properties": null
+                },
+                {
+                    "type": "EDGE_LABEL",
+                    "label": "originated_from",
+                    "properties": null
+                },
+                {
+                    "type": "EDGE_LABEL",
+                    "label": "targeted",
+                    "properties": null
+                },
+                {
+                    "type": "EDGE_LABEL",
+                    "label": "for_service",
+                    "properties": null
+                },
+                {
+                    "type": "EDGE_LABEL",
+                    "label": "causes_event",
+                    "properties": null
+                },
+                {
+                    "type": "PROPERTY_KEY",
+                    "label": "name",
+                    "properties": null
+                },
+                {
+                    "type": "PROPERTY_KEY",
+                    "label": "address",
+                    "properties": null
+                },
+                {
+                    "type": "PROPERTY_KEY",
+                    "label": "date_closed",
+                    "properties": null
+                },
+                {
+                    "type": "PROPERTY_KEY",
+                    "label": "date_opened",
+                    "properties": null
+                },
+                {
+                    "type": "PROPERTY_KEY",
+                    "label": "event_type",
+                    "properties": null
+                },
+                {
+                    "type": "PROPERTY_KEY",
+                    "label": "event_id",
+                    "properties": null
+                },
+                {
+                    "type": "PROPERTY_KEY",
+                    "label": "status",
+                    "properties": null
+                },
+                {
+                    "type": "PROPERTY_KEY",
+                    "label": "description",
+                    "properties": null
+                },
+                {
+                    "type": "PROPERTY_KEY",
+                    "label": "asset_id",
+                    "properties": null
+                },
+                {
+                    "type": "PROPERTY_KEY",
+                    "label": "type",
+                    "properties": null
+                },
+                {
+                    "type": "PROPERTY_KEY",
+                    "label": "is_public",
+                    "properties": null
+                },
+                {
+                    "type": "PROPERTY_KEY",
+                    "label": "username",
+                    "properties": null
+                },
+                {
+                    "type": "PROPERTY_KEY",
+                    "label": "privilege_level",
+                    "properties": null
+                },
+                {
+                    "type": "PROPERTY_KEY",
+                    "label": "account_id",
+                    "properties": null
+                },
+                {
+                    "type": "PROPERTY_KEY",
+                    "label": "is_active",
+                    "properties": null
+                },
+                {
+                    "type": "PROPERTY_KEY",
+                    "label": "outcome",
+                    "properties": null
+                },
+                {
+                    "type": "PROPERTY_KEY",
+                    "label": "severity_level",
+                    "properties": null
+                },
+                {
+                    "type": "PROPERTY_KEY",
+                    "label": "timestamp",
+                    "properties": null
+                }
+            ]
+        },
+        {
+            "name": "sessions",
+            "target_details": [
+                {
+                    "type": "VERTEX",
+                    "label": "session",
+                    "properties": null
+                },
+                {
+                    "type": "EDGE",
+                    "label": "session_from_device",
+                    "properties": null
+                },
+                {
+                    "type": "EDGE",
+                    "label": "session_used_service",
+                    "properties": null
+                },
+                {
+                    "type": "EDGE",
+                    "label": "session_created_by",
+                    "properties": null
+                }
+            ]
+        }
+    ],
+    "roles": [
+    {
+      "name": "project_admin",
+      "description": "Full project graph access",
+      "permissions": [
+        {
+          "target": "entire_graph",
+          "operations": ["READ", "WRITE", "DELETE"]
+        },
+        {
+          "target": "gremlin_target",
+          "operations": ["EXECUTE"]
+        }
+      ]
+    },
+    {
+      "name": "contributor",
+      "description": "Read and write, but not remove existing data",
+      "permissions": [
+        {
+          "target": "entire_graph",
+          "operations": ["READ", "WRITE"]
+        },
+        {
+          "target": "gremlin_target",
+          "operations": ["EXECUTE"]
+        }
+      ]
+    },
+    {
+      "name": "session_user",
+      "description": "Only access to session-related data",
+      "permissions": [
+        {
+          "target": "service_graph",
+          "operations": ["READ"]
+        },
+        {
+          "target": "service_schema",
+          "operations": ["READ"]
+        },
+        {
+          "target": "gremlin_target",
+          "operations": ["EXECUTE"]
+        },
+        {
+            "target": "sessions",
+            "operations": ["WRITE"]
+        }
+      ]
+    },
+    {
+      "name": "viewer",
+      "description": "Can only read",
+      "permissions": [
+        {
+          "target": "entire_graph",
+          "operations": ["READ"]
+        },
+        {
+          "target": "gremlin_target",
+          "operations": ["EXECUTE"]
+        }
+      ]
+    }
+    ],
+    "users": [
+        {
+            "name": "project_admin_test",
+            "role": "project_admin",
+            "password_env": "PROJECT_ADMIN_PASSWORD"
+        },
+        {
+            "name": "contributor_test",
+            "role": "contributor",
+            "password_env": "CONTRIBUTOR_PASSWORD"
+        },
+        {
+            "name": "session_user_test",
+            "role": "session_user",
+            "password_env": "SESSION_USER_PASSWORD"
+        },
+        {
+            "name": "viewer_test",
+            "role": "viewer",
+            "password_env": "VIEWER_PASSWORD"
+        }
+    ]
+}

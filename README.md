@@ -29,4 +29,5 @@ The Hubble interface should be reachable with any browser on `http://localhost:8
 We will now set up the actual graph. We start by creating the graph scheme.
 ```
 $ python3 scripts/setup_schema.py
+$ python3 scripts/setup_rbac.py
 ```

@@ -6,7 +6,9 @@ from dotenv import load_dotenv
 
 from pathlib import Path
 
-load_dotenv()
+ROOT_DIR = Path(__file__).resolve().parent.parent
+
+load_dotenv(ROOT_DIR / ".env")
 
 BASE_URL = os.getenv("BASE_URL")
 USERNAME = os.getenv("HUGEGRAPH_USERNAME")
@@ -66,7 +68,15 @@ def request(method, endpoint, body=None):
             f"{response.text}"
         )
 
-    return response.json() if response.text else None
+    data =  response.json() if response.text else None
+    
+    if not response.ok:
+        raise RuntimeError(
+            f"{method} {path} -> HTTP {response.status_code}\n"
+            f"{data}"
+        )
+    
+    return data
 
 
 def ensure_schema(collection, name, definition):
