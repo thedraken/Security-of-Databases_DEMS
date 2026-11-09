@@ -1,50 +1,13 @@
 import os
 import json
-import base64
-import requests
-from dotenv import load_dotenv
-from pathlib import Path
-from urllib.parse import quote, urlsplit
+import common
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
-
-load_dotenv(ROOT_DIR / ".env")
-
-BASE_URL = os.getenv("BASE_URL")
-USERNAME = os.getenv("HUGEGRAPH_USERNAME")
-ADMIN_PASSWORD = os.getenv("HUGEGRAPH_ADMIN_PASSWORD")
-
-GRAPHSPACE = "DEFAULT"
 GRAPH = "hugegraph"
 
-if not BASE_URL:
-    raise RuntimeError("Set the BASE_URL environment variable.")
-
-if not USERNAME:
-    raise RuntimeError("Set the HUGEGRAPH_USERNAME environment variable.")
-
-if not ADMIN_PASSWORD:
-    raise RuntimeError("Set the HUGEGRAPH_ADMIN_PASSWORD environment variable.")
-
-# API endpoints
-AUTH = f"/graphspaces/{GRAPHSPACE}/auth"
 GROUPS = "/auth/groups"
 
-
-# This is used to specify the server we apply to
-# has form localhost:8080
-TARGET_URL = urlsplit(BASE_URL).netloc
-
-if not TARGET_URL:
-    raise RuntimeError("BASE_URL must contain a valid host and port.")
-
-# Authentication
-auth = base64.b64encode(
-    f"{USERNAME}:{ADMIN_PASSWORD}".encode()
-).decode()
-
 # JSON configuration
-CONFIG_PATH = ROOT_DIR / "json" / "rbac.json"
+CONFIG_PATH = common.ROOT_DIR / "json" / "rbac.json"
 
 with open(CONFIG_PATH, "r", encoding="utf-8") as file:
     config = json.load(file)
@@ -53,36 +16,17 @@ with open(CONFIG_PATH, "r", encoding="utf-8") as file:
 # HTTP functions
 # ------------------------------------------------
 
-def request(method, path, body=None):
+def request(method, endpoint, body=None):
     """
-        - Send an authenticated request and check for errors.
-        - inputs:
-            - method: Request Type (GET, POST, ...)
-            - endpoint: url endpoint (vertexlabels, ...)
-            - body: json body that is being sent
-        - output: 
-            - response in json form or None
-    """
-    response = requests.request(
-        method,
-        f"{BASE_URL}{path}",
-        headers={
-            "Authorization": f"Basic {auth}",
-            "Content-Type": "application/json"
-        },
-        json=body,
-        timeout=30
-    )
-
-    data =  response.json() if response.text else None
-
-    if not response.ok:
-        raise RuntimeError(
-            f"{method} {path} -> HTTP {response.status_code}\n"
-            f"{data}"
-        )
-
-    return data
+            - Send an authenticated request and check for errors.
+            - inputs:
+                - method: Request Type (GET, POST, ...)
+                - endpoint: url endpoint (vertexlabels, ...)
+                - body: JSON body that is being sent
+            - output:
+                - response in JSON form or None
+        """
+    return common.request(common.BASE_URL, method, endpoint, body)
 
 
 def find_existing(path, collection, key, value):
@@ -142,12 +86,12 @@ def ensure_target(target):
     body = {
         "target_name": name,
         "target_graph": GRAPH,
-        "target_url": TARGET_URL,
+        "target_url": common.TARGET_URL,
         "target_resources": target["target_details"]
     }
 
     return ensure_object(
-        path=f"{AUTH}/targets",
+        path=f"{common.AUTH}/targets",
         collection="targets",
         key="target_name",
         value=name,
@@ -214,7 +158,7 @@ def ensure_permission(group_id, target_id, permission):
     """
         Grant permission to a group on a target.
     """
-    path = f"{AUTH}/accesses"
+    path = f"{common.AUTH}/accesses"
 
     response = request("GET", path)
 
@@ -301,7 +245,7 @@ def ensure_user(user_config):
     }
 
     return ensure_object(
-        path=f"{AUTH}/users",
+        path=f"{common.AUTH}/users",
         collection="users",
         key="user_name",
         value=name,
@@ -314,7 +258,7 @@ def ensure_membership(user_id, group_id):
         Assign a user to a group if not already assigned.
     """
 
-    path = f"{AUTH}/belongs"
+    path = f"{common.AUTH}/belongs"
 
     response = request("GET", path)
 

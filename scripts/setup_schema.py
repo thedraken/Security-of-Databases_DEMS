@@ -1,82 +1,27 @@
-import os
 import json
-import base64
 import requests
-from dotenv import load_dotenv
+import common
 
 from pathlib import Path
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
-
-load_dotenv(ROOT_DIR / ".env")
-
-BASE_URL = os.getenv("BASE_URL")
-USERNAME = os.getenv("HUGEGRAPH_USERNAME")
-ADMIN_PASSWORD = os.getenv("HUGEGRAPH_ADMIN_PASSWORD")
 # HUGEGRAPH_AUTH_TOKEN_SECRET = os.getenv("HUGEGRAPH_AUTH_TOKEN_SECRET")
-
-if not BASE_URL:
-    raise RuntimeError("Set the BASE_URL environment variable.")
-
-if not USERNAME:
-    raise RuntimeError("Set the HUGEGRAPH_USERNAME environment variable.")
-
-if not ADMIN_PASSWORD:
-    raise RuntimeError("Set the HUGEGRAPH_ADMIN_PASSWORD environment variable.")
-
-# if not HUGEGRAPH_AUTH_TOKEN_SECRET:
-#    raise RuntimeError("Set the HUGEGRAPH_AUTH_TOKEN_SECRET environment variable.")
-
-
-GRAPH_URL = f"{BASE_URL}/graphspaces/DEFAULT/graphs/hugegraph"
-
-auth = base64.b64encode(
-    f"{USERNAME}:{ADMIN_PASSWORD}".encode()
-).decode()
 
 schema_path = Path(__file__).parent.parent / "json" / "graph_schema.json"
 
 with open(schema_path, "r", encoding="utf8") as file:
     schema = json.load(file)
 
-
 def request(method, endpoint, body=None):
     """
-        - Send an authenticated request and check for errors.
-        - inputs:
-            - method: Request Type (GET, POST, ...)
-            - endpoint: url endpoint (vertexlabels, ...)
-            - body: json body that is being sent
-        - output: 
-            - response in json form or None
-    """
-    response = requests.request(
-        method,
-        f"{GRAPH_URL}{endpoint}",
-        headers={
-            "Authorization": f"Basic {auth}",
-            "Content-Type": "application/json"
-        },
-        json=body,
-        timeout=30
-    )
-
-    if not response.ok:
-        raise RuntimeError(
-            f"{method} {endpoint}: "
-            f"HTTP {response.status_code}\n"
-            f"{response.text}"
-        )
-
-    data =  response.json() if response.text else None
-    
-    if not response.ok:
-        raise RuntimeError(
-            f"{method} {path} -> HTTP {response.status_code}\n"
-            f"{data}"
-        )
-    
-    return data
+            - Send an authenticated request and check for errors.
+            - inputs:
+                - method: Request Type (GET, POST, ...)
+                - endpoint: url endpoint (vertexlabels, ...)
+                - body: JSON body that is being sent
+            - output:
+                - response in JSON form or None
+        """
+    return common.request(common.GRAPH_URL, method, endpoint, body)
 
 
 def ensure_schema(collection, name, definition):
