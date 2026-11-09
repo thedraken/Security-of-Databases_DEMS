@@ -10,7 +10,7 @@ cd "$(dirname "$0")"
 echo "setup environment"
 ./setup_environment.sh
 echo "create docker"
-./create_docker.sh
+./create_docker.sh "$@"
 echo "setup DB"
 ./setup_db.sh
 curl http://localhost:8080/versions
