@@ -11,7 +11,7 @@ You can use `./full_setup.sh` to create the environment, create the docker, and 
 
 Once done, the final line of the script will do a curl request, and if you see the version number, the DB is up and available to be used.
 
-If you wish to reset everything, as running `./full_setup.sh` does not delete data, you can call `./full_setup.sh --reset` to wipe all the data. You can also equally call `create_docker.sh --reset` if you are only running the separate create docker script.
+If you wish to reset everything, as running `./full_setup.sh` does not delete data, you can call `./full_setup.sh --reset` to wipe all the data. You can also equally call `./create_docker.sh --reset` if you are only running the separate create docker script.
 
 ### Manual setup
 To setup the database, you need **python3** and **Docker** already installed.
