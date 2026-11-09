@@ -13,6 +13,11 @@ Once done, the final line of the script will do a curl request, and if you see t
 
 If you wish to reset everything, as running `./full_setup.sh` does not delete data, you can call `./full_setup.sh --reset` to wipe all the data. You can also equally call `./create_docker.sh --reset` if you are only running the separate create docker script.
 
+Do not forget to make the script executable, using `chmod +x FILENAME`
+
+#### Stop docker via script
+The script `stop_docker.sh` will stop the docker image and turn the HugeGraph server off.
+
 ### Manual setup
 To setup the database, you need **python3** and **Docker** already installed.
 
