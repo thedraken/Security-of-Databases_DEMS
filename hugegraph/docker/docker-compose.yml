@@ -39,7 +39,8 @@ services:
       # value into 120 silently, which the entrypoint rejects on purpose.
       HG_SERVER_STARTUP_TIMEOUT_S: ${HG_SERVER_STARTUP_TIMEOUT_S-120}
     ports:
-      - "8080:8080"
+#      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     volumes:
       - server-data:/hugegraph-server/rocksdb-data
     healthcheck:

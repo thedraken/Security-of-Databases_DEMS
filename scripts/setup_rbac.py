@@ -17,15 +17,6 @@ with open(CONFIG_PATH, "r", encoding="utf-8") as file:
 # ------------------------------------------------
 
 def request(method, endpoint, body=None):
-    """
-            - Send an authenticated request and check for errors.
-            - inputs:
-                - method: Request Type (GET, POST, ...)
-                - endpoint: url endpoint (vertexlabels, ...)
-                - body: JSON body that is being sent
-            - output:
-                - response in JSON form or None
-        """
     return common.request(common.BASE_URL, method, endpoint, body)
 
 
@@ -64,7 +55,7 @@ def ensure_object(path, collection, key, value, body):
 
     if not created or not created.get("id"):
         raise RuntimeError(
-            "Could not obtain ID of created object: {collection}/{value}"
+            f"Could not obtain ID of created object: {collection}/{value}"
         )
 
     print(f"Created: {collection}/{value}")

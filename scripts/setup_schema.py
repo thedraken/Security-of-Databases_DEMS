@@ -12,15 +12,6 @@ with open(schema_path, "r", encoding="utf8") as file:
     schema = json.load(file)
 
 def request(method, endpoint, body=None):
-    """
-            - Send an authenticated request and check for errors.
-            - inputs:
-                - method: Request Type (GET, POST, ...)
-                - endpoint: url endpoint (vertexlabels, ...)
-                - body: JSON body that is being sent
-            - output:
-                - response in JSON form or None
-        """
     return common.request(common.GRAPH_URL, method, endpoint, body)
 
 

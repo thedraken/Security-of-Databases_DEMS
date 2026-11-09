@@ -71,10 +71,4 @@ def request(url:str, method, endpoint, body=None):
 
     data = response.json() if response.text else None
 
-    if not response.ok:
-        raise RuntimeError(
-            f"{method} {endpoint} -> HTTP {response.status_code}\n"
-            f"{data}"
-        )
-
     return data
