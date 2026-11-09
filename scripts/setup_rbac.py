@@ -340,7 +340,7 @@ def validate_config():
 # ------------------------------------------------
 
 def main():
-    print("Configuring HugeGraph RVAC...\n")
+    print("Configuring HugeGraph RBAC...\n")
 
     validate_config()
 
