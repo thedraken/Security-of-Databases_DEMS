@@ -1,5 +1,5 @@
 # Security-of-Databases_DEMS
-This is a group project to create a graph datsa base for the class _Security of Databases_ at the University of Luxembourg. The database should help with asset management, session control, and investigating security incidents.\
+This is a group project to create a graph data base for the class _Security of Databases_ at the University of Luxembourg. The database should help with asset management, session control, and investigating security incidents.\
 We are using Apache Hugegraphs as an underlying DBMS, and implement a simple RBAC scheme on top of this.
 
 ## Setup
