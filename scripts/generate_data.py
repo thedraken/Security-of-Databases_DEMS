@@ -12,6 +12,7 @@ import unicodedata
 from datetime import datetime, timedelta, timezone
 
 import common
+import pii
 
 BATCH_SIZE = 500
 
@@ -68,6 +69,9 @@ JOB_TITLES = {
     "Sales":           ["Sales Representative", "Account Manager", "Sales Manager"],
     "IT Operations":   ["System Administrator", "Network Engineer", "IT Support"],
 }
+
+ANIMALS = ["cat", "dog", "horse", "rabbit", "owl", "fox", "dolphin", "penguin",
+           "elephant", "tiger", "panda", "wolf", "otter", "hedgehog", "parrot"]
 
 DATACENTER_NETWORK = "10.20.0.0/24"
 SERVERS = ["srv-mail", "srv-web", "srv-dev", "srv-fin", "srv-hr", "srv-ops"]
@@ -150,7 +154,8 @@ def delete_generated_data():
             raise RuntimeError(f"Could not delete {label} vertices: {result}")
         print(f"Deleted all {label} vertices")
 
-def build(people, n_sessions, n_violations, rng):
+def build(people, n_sessions, n_violations, seed):
+    rng = random.Random(seed)
     g = GraphBuilder()
 
     networks = {cidr: g.vertex("network", cidr=cidr)
@@ -201,11 +206,15 @@ def build(people, n_sessions, n_violations, rng):
     assignment = [dept_names[i % len(dept_names)] for i in range(len(people))]
     rng.shuffle(assignment)
 
+    # Separate generator so adding PII does not change the rest of the dataset.
+    animal_rng = random.Random(f"{seed}-animals")
+
     users, used_usernames, host_counter = [], set(), {}
     for n, ((first, last), dept) in enumerate(zip(people, assignment), start=1):
         dept_roles, office_net = DEPARTMENTS[dept]
         person = g.vertex("person", name=f"{first} {last}".strip(),
-                          job_title=rng.choice(JOB_TITLES[dept]))
+                          job_title=rng.choice(JOB_TITLES[dept]),
+                          pii=pii.encrypt(animal_rng.choice(ANIMALS)))
         g.edge("works_in_department", person, departments[dept])
 
         base = ".".join(p for p in (ascii_slug(first), ascii_slug(last)) if p) or f"user{n}"
@@ -302,7 +311,7 @@ def main():
         delete_generated_data()
 
     people = read_people(args.csv)
-    graph, expected = build(people, args.sessions, args.violations, random.Random(args.seed))
+    graph, expected = build(people, args.sessions, args.violations, args.seed)
     graph.insert()
 
     EXPECTED_PATH.parent.mkdir(exist_ok=True)

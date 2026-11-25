@@ -83,7 +83,8 @@ def create_vertex_labels():
         definition = {
             "name": vertex["name"],
             "id_strategy": "AUTOMATIC",
-            "properties": vertex["properties"]
+            "properties": vertex["properties"],
+            "nullable_keys": vertex.get("nullable_keys", [])
         }
 
         ensure_schema(
@@ -91,6 +92,34 @@ def create_vertex_labels():
             vertex["name"],
             definition
         )
+        append_missing_properties(vertex)
+
+
+def append_missing_properties(vertex):
+    """
+        Add properties that were added to the JSON after the label was created.
+        HugeGraph only allows appending nullable properties, so every new
+        property must also be listed in the label's "nullable_keys".
+    """
+    name = vertex["name"]
+    current = request("GET", f"/schema/vertexlabels/{name}")
+    missing = [p for p in vertex["properties"] if p not in current["properties"]]
+    if not missing:
+        return
+
+    not_nullable = [p for p in missing if p not in vertex.get("nullable_keys", [])]
+    if not_nullable:
+        raise RuntimeError(
+            f"Cannot add {not_nullable} to existing label '{name}': "
+            "new properties must be listed in nullable_keys (or reset the database)"
+        )
+
+    request("PUT", f"/schema/vertexlabels/{name}?action=append", {
+        "name": name,
+        "properties": missing,
+        "nullable_keys": missing
+    })
+    print(f"Appended to vertexlabels/{name}: {', '.join(missing)}")
 
 
 def create_edge_labels():

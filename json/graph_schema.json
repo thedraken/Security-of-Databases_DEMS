@@ -21,12 +21,14 @@
     "job_title",
     "severity_level",
     "is_public",
-    "is_active"
+    "is_active",
+    "pii"
   ],
   "vertices": [
     {
       "name": "person",
-      "properties": ["name", "job_title"]
+      "properties": ["name", "job_title", "pii"],
+      "nullable_keys": ["pii"]
     },
     {
       "name": "device",

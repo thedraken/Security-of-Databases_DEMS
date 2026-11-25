@@ -63,8 +63,15 @@ $ .venv/bin/python scripts/generate_data.py --sessions 200 --violations 15 --see
 ```
 The planted violations are written to `data/expected_violations.json`.
 
+### Encrypted personal information (PII)
+Each `person` has a `pii` property holding their favourite animal, encrypted with Fernet (AES + HMAC) in Python before it is sent to HugeGraph; the database only stores ciphertext.
+The key is `PII_ENCRYPTION_KEY` in `.env`, created by `setup_environment.sh`. Losing the key makes the values unreadable.
+```
+$ .venv/bin/python scripts/pii.py show # Show the PII of each person
+```
+
 ### Unauthorized access report
-`scripts/report_violations.py` lists every session whose account has no `has_role \rightarrow grants_permission \rightarrow applies_to` path to the service it used.
+`scripts/report_violations.py` lists every session whose account has no `has_role` &rarr; `grants_permission` &rarr; `applies_to` path to the service it used.
 ```
 $ .venv/bin/python scripts/report_violations.py                  # print the report
 $ .venv/bin/python scripts/report_violations.py --check          # compare with the planted violations

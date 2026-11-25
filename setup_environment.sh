@@ -24,3 +24,6 @@ else
     echo "create .env"
     .venv/bin/python scripts/create_env.py
 fi
+
+echo "ensure PII encryption key exists"
+.venv/bin/python scripts/pii.py init-key
