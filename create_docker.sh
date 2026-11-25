@@ -28,3 +28,9 @@ fi
 
 echo "create containers (project dems_hugegraph)"
 "${COMPOSE[@]}" --env-file .env up -d --wait
+
+echo "Apply some configs"
+"${DOCKER[@]}" exec dems_hugegraph-server-1 sh -c 'sed -i "s/^log.slow_query_threshold=.*/log.slow_query_threshold=1/" /hugegraph-server/conf/rest-server.properties'
+
+#echo "Restart the docker container"
+#"${DOCKER[@]}" restart dems_hugegraph-server-1
