@@ -118,7 +118,7 @@ class GraphBuilder:
 
 
 def iso(moment):
-    return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
+    return moment.strftime(common.DATE_FORMAT)
 
 
 def ascii_slug(text):
@@ -165,14 +165,14 @@ def build(people, n_sessions, n_violations, seed):
     servers = {}
     core_switch = g.vertex("device", name="core-switch", asset_id="NET-001",
                            status="active", type="switch")
-    ip_ = g.vertex("ip_address", address="10.20.0.1", is_public="false")
+    ip_ = g.vertex("ip_address", address="10.20.0.1", is_public=False)
     g.edge("has_ip", core_switch, ip_)
     g.edge("in_network", ip_, networks[DATACENTER_NETWORK])
 
     for n, server in enumerate(SERVERS, start=1):
         servers[server] = g.vertex("device", name=server, asset_id=f"SRV-{n:03d}",
                                    status="active", type="server")
-        ip_ = g.vertex("ip_address", address=f"10.20.0.{10 + n}", is_public="false")
+        ip_ = g.vertex("ip_address", address=f"10.20.0.{10 + n}", is_public=False)
         g.edge("has_ip", servers[server], ip_)
         g.edge("in_network", ip_, networks[DATACENTER_NETWORK])
         g.edge("connected_to_device", servers[server], core_switch)
@@ -226,7 +226,7 @@ def build(people, n_sessions, n_violations, seed):
         privilege = max((ROLES[r][0] for r in dept_roles),
                         key=["low", "medium", "high"].index)
         account = g.vertex("account", account_id=f"ACC-{n:04d}", username=username,
-                           type="employee", is_active="true", privilege_level=privilege)
+                           type="employee", is_active=True, privilege_level=privilege)
         g.edge("has_account", person, account)
         for role_name in dept_roles:
             g.edge("has_role", account, roles[role_name])
@@ -236,7 +236,7 @@ def build(people, n_sessions, n_violations, seed):
         g.edge("uses_device", person, laptop)
         host_counter[office_net] = host_counter.get(office_net, 9) + 1
         address = office_net.rsplit(".", 1)[0] + f".{host_counter[office_net]}"
-        ip_ = g.vertex("ip_address", address=address, is_public="false")
+        ip_ = g.vertex("ip_address", address=address, is_public=False)
         g.edge("has_ip", laptop, ip_)
         g.edge("in_network", ip_, networks[office_net])
 
@@ -282,7 +282,7 @@ def build(people, n_sessions, n_violations, seed):
         g.edge("originated_from", event, user["ip"])
         g.edge("targeted", event, services[rng.choice(user["allowed"])])
 
-    public_ip = g.vertex("ip_address", address="203.0.113.50", is_public="true")
+    public_ip = g.vertex("ip_address", address="203.0.113.50", is_public=True)
     g.edge("in_network", public_ip, internet)
 
     expected.sort(key=lambda v: v["date_opened"])

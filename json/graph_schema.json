@@ -5,8 +5,8 @@
     "asset_id",
     "description",
     "status",
-    "date_opened",
-    "date_closed",
+    {"name": "date_opened", "data_type": "DATE"},
+    {"name": "date_closed", "data_type": "DATE"},
     "privilege_level",
     "action",
     "scope",
@@ -16,12 +16,12 @@
     "username",
     "event_id",
     "event_type",
-    "timestamp",
+    {"name": "timestamp", "data_type": "DATE"},
     "outcome",
     "job_title",
     "severity_level",
-    "is_public",
-    "is_active",
+    {"name": "is_public", "data_type": "BOOLEAN"},
+    {"name": "is_active", "data_type": "BOOLEAN"},
     "pii"
   ],
   "vertices": [
@@ -257,6 +257,34 @@
       "base_value": "security_event",
       "index_type": "SECONDARY",
       "fields": ["event_type"]
+    },
+    {
+      "name": "ip_address_by_is_public",
+      "base_type": "VERTEX_LABEL",
+      "base_value": "ip_address",
+      "index_type": "SECONDARY",
+      "fields": ["is_public"]
+    },
+    {
+      "name": "account_by_is_active",
+      "base_type": "VERTEX_LABEL",
+      "base_value": "account",
+      "index_type": "SECONDARY",
+      "fields": ["is_active"]
+    },
+    {
+      "name": "session_by_date_opened",
+      "base_type": "VERTEX_LABEL",
+      "base_value": "session",
+      "index_type": "RANGE",
+      "fields": ["date_opened"]
+    },
+    {
+      "name": "security_event_by_timestamp",
+      "base_type": "VERTEX_LABEL",
+      "base_value": "security_event",
+      "index_type": "RANGE",
+      "fields": ["timestamp"]
     },
     {
       "name": "security_event_by_event_id",

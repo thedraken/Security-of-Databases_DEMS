@@ -63,13 +63,32 @@ def create_property_keys():
     """
         Create all property keys
     """
-    for name in schema["property_keys"]:
+    existing = {
+        key["name"]: key["data_type"]
+        for key in request("GET", "/schema/propertykeys").get("propertykeys", [])
+    }
+
+    for entry in schema["property_keys"]:
+        # An entry is either "name" (TEXT) or {"name": ..., "data_type": ...}
+        if isinstance(entry, str):
+            entry = {"name": entry}
+        name = entry["name"]
+        data_type = entry.get("data_type", "TEXT")
+
+        # HugeGraph cannot change the type of an existing property key.
+        if name in existing and existing[name] != data_type:
+            raise RuntimeError(
+                f"Property key '{name}' is {existing[name]} in the database but "
+                f"{data_type} in graph_schema.json. Reset the database: "
+                "./create_docker.sh --reset && ./setup_db.sh"
+            )
+
         ensure_schema(
             collection="propertykeys",
             name=name,
             definition={
                 "name": name,
-                "data_type": "TEXT",
+                "data_type": data_type,
                 "cardinality": "SINGLE"
             }
         )

@@ -90,7 +90,11 @@ def main():
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
 
-    findings = sorted(gremlin(VIOLATIONS_QUERY), key=lambda f: f["date_opened"])
+    findings = gremlin(VIOLATIONS_QUERY)
+    for f in findings:
+        # HugeGraph returns DATE values as "YYYY-MM-DD HH:MM:SS.mmm"; drop the milliseconds
+        f["date_opened"] = f["date_opened"][:19]
+    findings.sort(key=lambda f: f["date_opened"])
 
     print(f"Unauthorized access report ({datetime.now(timezone.utc):%Y-%m-%d %H:%M} UTC)")
     print(f"{len(findings)} session(s) used a service without a matching permission\n")

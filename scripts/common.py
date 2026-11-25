@@ -15,6 +15,8 @@ ADMIN_PASSWORD = os.getenv("HUGEGRAPH_ADMIN_PASSWORD")
 BASE_URL = os.getenv("BASE_URL")
 GRAPHSPACE = "DEFAULT"
 
+DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+
 # API endpoints
 AUTH = f"/graphspaces/{GRAPHSPACE}/auth"
 GRAPH_URL = f"{BASE_URL}/graphspaces/DEFAULT/graphs/hugegraph"
