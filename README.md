@@ -51,6 +51,26 @@ $ python3 scripts/setup_schema.py
 $ python3 scripts/setup_rbac.py
 ```
 
+### Example data
+`setup_db.sh` also runs `scripts/generate_data.py`, which creates example data from `participants.csv` (columns `First name`, `Last name`).
+This file is not in the repository; place it in the project root.
+Each person is assigned to one of 5 departments and gets an account, a laptop and the roles of their department.
+Then 100 sessions are generated, 8 of which deliberately use a service the account has no permission for. The script skips if data already exists.
+
+``` bash
+$ .venv/bin/python scripts/generate_data.py --replace            # wipe and regenerate
+$ .venv/bin/python scripts/generate_data.py --sessions 200 --violations 15 --seed 7
+```
+The planted violations are written to `data/expected_violations.json`.
+
+### Unauthorized access report
+`scripts/report_violations.py` lists every session whose account has no `has_role \rightarrow grants_permission \rightarrow applies_to` path to the service it used.
+```
+$ .venv/bin/python scripts/report_violations.py                  # print the report
+$ .venv/bin/python scripts/report_violations.py --check          # compare with the planted violations
+$ .venv/bin/python scripts/report_violations.py --record-events  # store findings as security_event vertices
+```
+
 ## How to use
 The DBMs interface is reachable on `http://localhost:8088`. 
 There are multiple ways to interact using the interface. 
