@@ -52,14 +52,14 @@ $ python3 scripts/setup_rbac.py
 ```
 
 ### Example data
-`setup_db.sh` also runs `scripts/generate_data.py`, which creates example data from `participants.csv` (columns `First name`, `Last name`).
-This file is not in the repository; place it in the project root.
+`setup_db.sh` also runs `scripts/generate_data.py`, which creates example data.
+It generates people with random names. 
 Each person is assigned to one of 5 departments and gets an account, a laptop and the roles of their department.
 Then 100 sessions are generated, 8 of which deliberately use a service the account has no permission for. The script skips if data already exists.
 
 ``` bash
 $ .venv/bin/python scripts/generate_data.py --replace            # wipe and regenerate
-$ .venv/bin/python scripts/generate_data.py --sessions 200 --violations 15 --seed 7
+$ .venv/bin/python scripts/generate_data.py --people 30 --sessions 200 --violations 15 --seed 7
 ```
 The planted violations are written to `data/expected_violations.json`.
 

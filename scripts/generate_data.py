@@ -10,13 +10,13 @@ import random
 import sys
 import unicodedata
 from datetime import datetime, timedelta, timezone
+from faker import Faker
 
 import common
 import pii
 
 BATCH_SIZE = 500
 
-DEFAULT_CSV = common.ROOT_DIR / "participants.csv"
 EXPECTED_PATH = common.ROOT_DIR / "data" / "expected_violations.json"
 
 #Every vertex label this script creates
@@ -126,16 +126,13 @@ def ascii_slug(text):
     return "".join(c for c in text.lower() if c.isalnum())
 
 
-def read_people(csv_path):
-    with open(csv_path, newline="", encoding="utf-8-sig") as file:
-        people = [
-            (row["First name"].strip(), row["Last name"].strip())
-            for row in csv.DictReader(file)
-            if row.get("First name", "").strip() or row.get("Last name", "").strip()
-        ]
-    if not people:
-        raise RuntimeError(f"No people found in {csv_path}")
-    return people
+def generate_people(count: int, seed:int = 42):
+    """
+        Generates <count> fake names
+    """
+    Faker.seed(seed)
+    fake = Faker("en_US")
+    return [fake.name() for _ in range(count)]
 
 
 def graph_has_data():
@@ -210,14 +207,18 @@ def build(people, n_sessions, n_violations, seed):
     animal_rng = random.Random(f"{seed}-animals")
 
     users, used_usernames, host_counter = [], set(), {}
-    for n, ((first, last), dept) in enumerate(zip(people, assignment), start=1):
+    for n, (name, dept) in enumerate(zip(people, assignment), start=1):
         dept_roles, office_net = DEPARTMENTS[dept]
-        person = g.vertex("person", name=f"{first} {last}".strip(),
+        person = g.vertex("person", name=f"{name}".strip(),
                           job_title=rng.choice(JOB_TITLES[dept]),
                           pii=pii.encrypt(animal_rng.choice(ANIMALS)))
         g.edge("works_in_department", person, departments[dept])
 
-        base = ".".join(p for p in (ascii_slug(first), ascii_slug(last)) if p) or f"user{n}"
+
+        # Normalize and join first and last name by dots
+        # i.e. Jöhn Doe -> john.doe
+        name_parts = name.split()
+        base = ".".join(p for p in (ascii_slug(part) for part in name_parts) if p) or f"user{n}"
         username, suffix = base, 2
         while username in used_usernames:
             username, suffix = f"{base}{suffix}", suffix + 1
@@ -292,7 +293,7 @@ def build(people, n_sessions, n_violations, seed):
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--csv", default=DEFAULT_CSV, help="participants CSV file")
+    parser.add_argument("--people", type=int, default=20, help="number of people")
     parser.add_argument("--sessions", type=int, default=100)
     parser.add_argument("--violations", type=int, default=8,
                         help="number of sessions that use a service without permission")
@@ -310,7 +311,7 @@ def main():
             return
         delete_generated_data()
 
-    people = read_people(args.csv)
+    people = generate_people(args.people, args.seed)
     graph, expected = build(people, args.sessions, args.violations, args.seed)
     graph.insert()
 
@@ -318,7 +319,7 @@ def main():
     EXPECTED_PATH.write_text(json.dumps(expected, indent=2), encoding="utf-8")
 
     print(f"Inserted {len(graph.vertices)} vertices and {len(graph.edges)} edges "
-          f"({len(people)} people, {args.sessions} sessions, "
+          f"({args.people} people, {args.sessions} sessions, "
           f"{args.violations} unauthorized).")
     print(f"Expected violations written to {EXPECTED_PATH.relative_to(common.ROOT_DIR)}")
 
