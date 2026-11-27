@@ -5,18 +5,18 @@ We are using Apache Hugegraphs as an underlying DBMS, and implement a simple RBA
 ## Setup
 ### Script setup
 You can use `./full_setup.sh` to create the environment, create the docker, and then setup the DB. The steps are also broken down into:
-- `setup_environment.sh`
-- `create_docker.sh`
-- `setup_db.sh`
+- `scripts/setup_environment.sh`
+- `scripts/create_docker.sh`
+- `scripts/setup_db.sh`
 
 Once done, the final line of the script will do a curl request, and if you see the version number, the DB is up and available to be used.
 
-If you wish to reset everything, as running `./full_setup.sh` does not delete data, you can call `./full_setup.sh --reset` to wipe all the data. You can also equally call `./create_docker.sh --reset` if you are only running the separate create docker script.
+If you wish to reset everything, as running `./full_setup.sh` does not delete data, you can call `./full_setup.sh --reset` to wipe all the data. You can also equally call `./scripts/create_docker.sh --reset` if you are only running the separate create docker script.
 
 Do not forget to make the script executable, using `chmod +x FILENAME`
 
 #### Stop docker via script
-The script `stop_docker.sh` will stop the docker image and turn the HugeGraph server off.
+The script `scripts/stop_docker.sh` will stop the docker image and turn the HugeGraph server off.
 
 ### Manual setup
 To setup the database, you need **python3** and **Docker** already installed.
@@ -27,8 +27,6 @@ $ pip install -r scripts/requirements.txt
 $ python3 scripts/create_env.py
 ```
 Reminder: The `.env` file is a hidden file, so you can verify its creation with `ls -a`
-
----
 
 Next, we need to set up the docker container. To avoid conflicts with other instances of this program, you can change the container name after `-p` to something that has not yet been used.
 ```
@@ -44,7 +42,6 @@ $ curl http://localhost:8080/versions
 ```
 The Hubble interface should be reachable with any browser on `http://localhost:8088`.
 
----
 We will now set up the actual graph. We start by creating the graph scheme.
 ```
 $ python3 scripts/setup_schema.py
@@ -52,7 +49,7 @@ $ python3 scripts/setup_rbac.py
 ```
 
 ### Example data
-`setup_db.sh` also runs `scripts/generate_data.py`, which creates example data.
+`scripts/setup_db.sh` also runs `scripts/generate_data.py`, which creates example data.
 It generates people with random names. 
 Each person is assigned to one of 5 departments and gets an account, a laptop and the roles of their department.
 Then 100 sessions are generated, 8 of which deliberately use a service the account has no permission for. The script skips if data already exists.

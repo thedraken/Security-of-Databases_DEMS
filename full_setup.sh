@@ -8,10 +8,10 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 echo "setup environment"
-./setup_environment.sh
+./scripts/setup_environment.sh
 echo "create docker"
-./create_docker.sh "$@"
+./scripts/create_docker.sh "$@"
 echo "setup DB"
-./setup_db.sh
+./scripts/setup_db.sh
 curl http://localhost:8080/versions
 echo "done. Running at: http://localhost:8088"

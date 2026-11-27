@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 #Check for python3-venv being installed
 if ! python3 -m venv --help >/dev/null 2>&1; then
