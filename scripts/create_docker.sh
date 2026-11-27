@@ -31,7 +31,7 @@ echo "create containers (project dems_hugegraph)"
 
 echo "Apply some configs"
 "${COMPOSE[@]}" --env-file .env exec -T server sh -c \
-  'sed -i "s/^log.slow_query_threshold=.*/log.slow_query_threshold=1/" /hugegraph-server/conf/rest-server.properties'
+  'sed -i "s/^log.slow_query_threshold=.*/log.slow_query_threshold=10/" /hugegraph-server/conf/rest-server.properties'
 
 echo "Restart server so the config takes effect"
 "${COMPOSE[@]}" --env-file .env restart server

@@ -43,6 +43,7 @@ services:
       - "127.0.0.1:8080:8080"
     volumes:
       - server-data:/hugegraph-server/rocksdb-data
+      - ../../logs:/hugegraph-server/logs
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8080/versions >/dev/null"]
       interval: 10s
