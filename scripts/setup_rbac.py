@@ -17,6 +17,7 @@ with open(CONFIG_PATH, "r", encoding="utf-8") as file:
 # ------------------------------------------------
 
 def request(method, endpoint, body=None):
+    """ Do the API call """
     return common.request(common.BASE_URL, method, endpoint, body)
 
 
