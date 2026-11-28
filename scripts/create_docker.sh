@@ -26,6 +26,10 @@ else
     "${COMPOSE[@]}" down || true
 fi
 
+echo "ensure logs folder is writable by the HugeGraph container"
+mkdir -p logs
+"${DOCKER[@]}" run --rm -v "$PWD/logs:/logs" alpine chown 10001:10001 /logs
+
 echo "create containers (project dems_hugegraph)"
 "${COMPOSE[@]}" --env-file .env up -d --wait
 

@@ -23,6 +23,8 @@ networks:
 volumes:
   server-data:
   hubble-data:
+  #Https service
+  caddy-data:
 
 services:
   server:
@@ -40,6 +42,7 @@ services:
       HG_SERVER_STARTUP_TIMEOUT_S: ${HG_SERVER_STARTUP_TIMEOUT_S-120}
     ports:
 #      - "8080:8080"
+#Only accsible form local host
       - "127.0.0.1:8080:8080"
     volumes:
       - server-data:/hugegraph-server/rocksdb-data
@@ -61,8 +64,11 @@ services:
         condition: service_healthy
     environment:
       SPRING_DATASOURCE_URL: jdbc:h2:file:/hubble/data/hubble;DB_CLOSE_ON_EXIT=FALSE
-    ports:
-      - "${HUBBLE_PUBLISH_HOST:-127.0.0.1}:8088:8088"
+    #Hubble is only reachable inside the Docker network hg-net.
+    #Enabled to enforce https
+    expose: ["8088"]
+#    ports:
+#      - "${HUBBLE_PUBLISH_HOST:-127.0.0.1}:8088:8088"
     volumes:
       - hubble-data:/hubble/data
       - ./conf/hubble/standalone.properties:/hubble/conf/hugegraph-hubble.properties:ro
@@ -77,3 +83,20 @@ services:
       timeout: 5s
       retries: 30
       start_period: 60s
+  #Enforce https
+  proxy:
+    image: caddy:2
+    restart: unless-stopped
+    networks: [hg-net]
+    depends_on:
+      hubble:
+        condition: service_healthy
+    ports:
+      # Https port
+      - "127.0.0.1:8443:8443"
+      # Redirect old URL to HTTPS
+      - "127.0.0.1:8088:8088"
+    volumes:
+      - ./conf/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./conf/caddy/certs:/certs:ro
+      - caddy-data:/data

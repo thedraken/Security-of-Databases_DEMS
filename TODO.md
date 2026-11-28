@@ -1,4 +1,4 @@
-- [ ] Adding HTTPS @thedraken
+- [x] Adding HTTPS @thedraken
 - [ ] Add tests regarding RBAC permission @DegrandChris
 - [ ] Add API call examples to README 
 - [ ] Add Backup & Recovery options

@@ -14,4 +14,4 @@ echo "create docker"
 echo "setup DB"
 ./scripts/setup_db.sh
 curl http://localhost:8080/versions
-echo "done. Running at: http://localhost:8088"
+echo "done. Running at: https://localhost:8443"
