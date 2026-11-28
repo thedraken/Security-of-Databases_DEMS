@@ -13,4 +13,4 @@
 - [ ] Create Powerpoint
 - [ ] Create demo videos
 - [ ] Document code
-- [ ] Salt and hashing function on new PII data
+- [x] Salt and hashing function on new PII data
