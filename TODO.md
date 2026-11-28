@@ -1,6 +1,6 @@
 - [x] Adding HTTPS @thedraken
 - [ ] Add tests regarding RBAC permission @DegrandChris
-- [ ] Add API call examples to README 
+- [x] Add API call examples to README 
 - [ ] Add Backup & Recovery options
 - [ ] See if we can improve & export logging somehow
 - [ ] Add some more weird data
