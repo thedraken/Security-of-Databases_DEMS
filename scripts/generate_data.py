@@ -18,6 +18,8 @@ import pii
 BATCH_SIZE = 500
 
 EXPECTED_PATH = common.ROOT_DIR / "data" / "expected_violations.json"
+EXPECTED_SAFE_WORDS_PATH = common.ROOT_DIR / "data" / ("expected_safe "
+                                                       "words.json")
 
 #Every vertex label this script creates
 DATA_LABELS = [
@@ -72,6 +74,8 @@ JOB_TITLES = {
 
 ANIMALS = ["cat", "dog", "horse", "rabbit", "owl", "fox", "dolphin", "penguin",
            "elephant", "tiger", "panda", "wolf", "otter", "hedgehog", "parrot"]
+
+SAFE_WORDS = ["mum", "dad", "son", "daughter", "pineapple", "orange"]
 
 DATACENTER_NETWORK = "10.20.0.0/24"
 SERVERS = ["srv-mail", "srv-web", "srv-dev", "srv-fin", "srv-hr", "srv-ops"]
@@ -205,17 +209,24 @@ def build(people, n_sessions, n_violations, seed):
 
     # Separate generator so adding PII does not change the rest of the dataset.
     animal_rng = random.Random(f"{seed}-animals")
+    safe_word_rng = random.Random(f"{seed}-safe-words")
+
+    #Used for checking later what the word was
+    safe_words = {}
 
     users, used_usernames, host_counter = [], set(), {}
     for n, (name, dept) in enumerate(zip(people, assignment), start=1):
         dept_roles, office_net = DEPARTMENTS[dept]
+        word = safe_word_rng.choice(SAFE_WORDS)
+        safe_words[name] = word
         person = g.vertex("person", name=f"{name}".strip(),
                           job_title=rng.choice(JOB_TITLES[dept]),
-                          pii=pii.encrypt(animal_rng.choice(ANIMALS)))
+                          pii=pii.encrypt(animal_rng.choice(ANIMALS)),
+                          safe_word=pii.hash_secret(word))
         g.edge("works_in_department", person, departments[dept])
 
 
-        # Normalize and join first and last name by dots
+        # Normalise and join first and last name by dots
         # i.e. Jöhn Doe -> john.doe
         name_parts = name.split()
         base = ".".join(p for p in (ascii_slug(part) for part in name_parts) if p) or f"user{n}"
@@ -287,7 +298,7 @@ def build(people, n_sessions, n_violations, seed):
     g.edge("in_network", public_ip, internet)
 
     expected.sort(key=lambda v: v["date_opened"])
-    return g, expected
+    return g, expected, safe_words
 
 
 def main():
@@ -312,11 +323,16 @@ def main():
         delete_generated_data()
 
     people = generate_people(args.people, args.seed)
-    graph, expected = build(people, args.sessions, args.violations, args.seed)
+    graph, expected, safe_words = build(people, args.sessions,
+                                        args.violations, args.seed)
     graph.insert()
 
     EXPECTED_PATH.parent.mkdir(exist_ok=True)
     EXPECTED_PATH.write_text(json.dumps(expected, indent=2), encoding="utf-8")
+
+    EXPECTED_SAFE_WORDS_PATH.parent.mkdir(exist_ok=True)
+    EXPECTED_SAFE_WORDS_PATH.write_text(json.dumps(safe_words, indent=2),
+                                        encoding="utf-8")
 
     print(f"Inserted {len(graph.vertices)} vertices and {len(graph.edges)} edges "
           f"({args.people} people, {args.sessions} sessions, "

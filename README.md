@@ -22,14 +22,14 @@ The script `scripts/stop_docker.sh` will stop the docker image and turn the Huge
 To setup the database, you need **python3** and **Docker** already installed.
 
 We start by creating the .env file. This file stores important local parameters: the graph url, admin username and password, and a secret token needed for Docker. We can set the .env file up with the `create_env.py` script>. This will prompt you to enter an admin username and password, as well as passwords for each of the test users. If you those later, they will use default passwords.
-```
+```bash
 $ pip install -r scripts/requirements.txt
 $ python3 scripts/create_env.py
 ```
 Reminder: The `.env` file is a hidden file, so you can verify its creation with `ls -a`
 
 Next, we need to set up the docker container. To avoid conflicts with other instances of this program, you can change the container name after `-p` to something that has not yet been used.
-```
+```bash
 $ docker compose \
   --env-file .env \
   -p dems_hugegraph \
@@ -43,7 +43,7 @@ $ curl http://localhost:8080/versions
 The Hubble interface should be reachable with any browser on `http://localhost:8088`.
 
 We will now set up the actual graph. We start by creating the graph scheme.
-```
+```bash
 $ python3 scripts/setup_schema.py
 $ python3 scripts/setup_rbac.py
 ```
@@ -60,12 +60,21 @@ $ .venv/bin/python scripts/generate_data.py --people 30 --sessions 200 --violati
 ```
 The planted violations are written to `data/expected_violations.json`.
 
-### Encrypted personal information (PII)
+### Encrypted personal identifiable information (PII)
 Each `person` has a `pii` property holding their favourite animal, encrypted with Fernet (AES + HMAC) in Python before it is sent to HugeGraph; the database only stores ciphertext.
 The key is `PII_ENCRYPTION_KEY` in `.env`, created by `setup_environment.sh`. Losing the key makes the values unreadable.
-```
+```bash
 $ .venv/bin/python scripts/pii.py show # Show the PII of each person
 ```
+
+### Each person has a safe_word
+Each `person` has a `safe-word` property holding a key word only they know. It has been salted and hashed with scrypt in Python before it is sent to HugeGraph; the database only stores hashed value.
+
+To check the value, you can use the following in the `pii.py` script:
+```bash
+$ python scripts/pii.py verify "<person_name>" [safe_word] #check a safe word
+```
+This will return either a 0 for correct, or 1 for incorrect (Standard `SystemExit` format)
 
 ## How to use
 The DBMs interface is reachable on `http://localhost:8088`. 

@@ -22,13 +22,14 @@
     "severity_level",
     {"name": "is_public", "data_type": "BOOLEAN"},
     {"name": "is_active", "data_type": "BOOLEAN"},
-    "pii"
+    "pii",
+    "safe_word"
   ],
   "vertices": [
     {
       "name": "person",
-      "properties": ["name", "job_title", "pii"],
-      "nullable_keys": ["pii"]
+      "properties": ["name", "job_title", "pii", "safe_word"],
+      "nullable_keys": ["pii", "safe_word"]
     },
     {
       "name": "device",
