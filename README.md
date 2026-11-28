@@ -67,14 +67,6 @@ The key is `PII_ENCRYPTION_KEY` in `.env`, created by `setup_environment.sh`. Lo
 $ .venv/bin/python scripts/pii.py show # Show the PII of each person
 ```
 
-### Unauthorized access report
-`scripts/report_violations.py` lists every session whose account has no `has_role` &rarr; `grants_permission` &rarr; `applies_to` path to the service it used.
-```
-$ .venv/bin/python scripts/report_violations.py                  # print the report
-$ .venv/bin/python scripts/report_violations.py --check          # compare with the planted violations
-$ .venv/bin/python scripts/report_violations.py --record-events  # store findings as security_event vertices
-```
-
 ## How to use
 The DBMs interface is reachable on `http://localhost:8088`. 
 There are multiple ways to interact using the interface. 
