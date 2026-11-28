@@ -77,7 +77,7 @@ $ python scripts/pii.py verify "<person_name>" [safe_word] #check a safe word
 This will return either a 0 for correct, or 1 for incorrect (Standard `SystemExit` format)
 
 ## How to use
-The DBMs interface is reachable on `http://localhost:8088`. 
+The DBMs interface is reachable on `https://localhost:8443`. 
 There are multiple ways to interact using the interface. 
 - The graph scheme is shown on Graph-Overview > hugegraph
 - Gremlin Queries can be executed in Graph Query > GQL Traversal
