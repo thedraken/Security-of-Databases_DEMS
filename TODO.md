@@ -1,0 +1,16 @@
+- [ ] Adding HTTPS @thedraken
+- [ ] Add tests regarding RBAC permission @DegrandChris
+- [ ] Add API call examples to README 
+- [ ] Add Backup & Recovery options
+- [ ] See if we can improve & export logging somehow
+- [ ] Add some more weird data
+  - [ ] Multiple devices with same ip address
+  - [ ] One device used for a lot of different accounts
+  - [ ] Person without department
+  - [ ] Etc.
+- [ ] Rework README
+- [ ] Rework Report
+- [ ] Create Powerpoint
+- [ ] Create demo videos
+- [ ] Document code
+- [ ] Salt and hashing function on new PII data

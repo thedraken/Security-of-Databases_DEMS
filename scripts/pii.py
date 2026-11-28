@@ -1,7 +1,10 @@
 """
 Usage:
-    python scripts/pii.py init-key   #add a key to .env if it has none
+    python scripts/pii.py init-key   #add a key to .env if it has none -
+    Needed for encryption
     python scripts/pii.py show       #list people with their decrypted PII
+
+    #TODO add salt and hash function, so we can test that function in graph DB
 """
 import os
 import sys
