@@ -14,3 +14,4 @@
 - [ ] Create demo videos
 - [ ] Document code
 - [x] Salt and hashing function on new PII data
+- [ ] Fix scripts/stop_docker.sh as points to wrong location for docker-compose.yml
