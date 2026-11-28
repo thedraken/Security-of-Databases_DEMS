@@ -1,9 +1,9 @@
-- [x] Adding HTTPS @thedraken
+- [x] Adding HTTPS
 - [ ] Add tests regarding RBAC permission @DegrandChris
 - [x] Add API call examples to README 
 - [ ] Add Backup & Recovery options
 - [ ] See if we can improve & export logging somehow
-- [ ] Add some more weird data
+- [ ] Add some more weird data:
   - [ ] Multiple devices with same ip address
   - [ ] One device used for a lot of different accounts
   - [ ] Person without department
